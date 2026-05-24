@@ -162,8 +162,13 @@ async def query_samples(request: Request) -> dict:
     if agg and interval:
         return await _aggregated_samples(metric, start, end, agg, interval)
 
+    session_id = request.query_params.get("session_id")
+
     conditions = ["metric = ?"]
     params: list = [metric]
+    if session_id:
+        conditions.append("sleep_session_id = ?")
+        params.append(int(session_id))
     if start:
         conditions.append("start_ts >= ?")
         params.append(start)
@@ -586,7 +591,7 @@ async function loadDashboard() {
 
   // Last night HR samples
   if (lastReal) {
-    const hrSamples = await fetchJSON(`/api/v1/samples?metric=heart_rate&start=${lastReal.start_ts}&end=${lastReal.end_ts}&limit=500`);
+    const hrSamples = await fetchJSON(`/api/v1/samples?metric=heart_rate&session_id=${lastReal.id}&limit=500`);
     if (hrSamples.data.length > 0) {
       new Chart(document.getElementById('lastHr'), {
         type: 'line',
@@ -601,7 +606,7 @@ async function loadDashboard() {
 
   // Last night sleep stages
   if (lastReal) {
-    const stages = await fetchJSON(`/api/v1/samples?metric=sleep_stage&start=${lastReal.start_ts}&end=${lastReal.end_ts}&limit=500`);
+    const stages = await fetchJSON(`/api/v1/samples?metric=sleep_stage&session_id=${lastReal.id}&limit=500`);
     if (stages.data.length > 0) {
       const stageLabels = { 1: 'Deep', 2: 'Light', 3: 'REM', 4: 'Awake' };
       const stageColors = { 1: CHART_COLORS.indigo, 2: CHART_COLORS.slate, 3: CHART_COLORS.cyan, 4: CHART_COLORS.amber };

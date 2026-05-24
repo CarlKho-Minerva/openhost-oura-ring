@@ -8,6 +8,12 @@ from . import db
 log = logging.getLogger(__name__)
 
 OURA_API = "https://api.ouraring.com/v2"
+
+
+def _to_utc(ts: str) -> str:
+    """Normalize any ISO 8601 timestamp to UTC with +00:00 suffix."""
+    dt = datetime.fromisoformat(ts)
+    return dt.astimezone(timezone.utc).isoformat()
 OURA_AUTH_URL = "https://cloud.ouraring.com/oauth/authorize"
 OURA_TOKEN_URL = "https://api.ouraring.com/oauth/token"
 OURA_SCOPES = "daily heartrate personal session"
@@ -127,10 +133,12 @@ async def _sync_sleep(client, headers, start_date, end_date):
             if not source_id:
                 continue
 
-            bedtime_start = rec.get("bedtime_start")
-            bedtime_end = rec.get("bedtime_end")
-            if not bedtime_start or not bedtime_end:
+            raw_start = rec.get("bedtime_start")
+            raw_end = rec.get("bedtime_end")
+            if not raw_start or not raw_end:
                 continue
+            bedtime_start = _to_utc(raw_start)
+            bedtime_end = _to_utc(raw_end)
 
             cursor = await conn.execute(
                 """INSERT INTO sleep_sessions (source, source_id, start_ts, end_ts)
@@ -234,7 +242,7 @@ def _insert_interval_samples(
     if not timestamp or not items:
         return
 
-    base = datetime.fromisoformat(timestamp)
+    base = datetime.fromisoformat(timestamp).astimezone(timezone.utc)
     for i, val in enumerate(items):
         if val is None:
             continue
@@ -256,7 +264,7 @@ STAGE_MAP = {"1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0}
 def _insert_sleep_stages(
     phases: str, bedtime_start: str, session_id: int, buf: list
 ):
-    base = datetime.fromisoformat(bedtime_start)
+    base = datetime.fromisoformat(bedtime_start).astimezone(timezone.utc)
     interval = 300
     for i, ch in enumerate(phases):
         val = STAGE_MAP.get(ch)
@@ -290,7 +298,7 @@ async def _sync_heartrate(client, headers, start_date, end_date):
             bpm = rec.get("bpm")
             if ts is None or bpm is None:
                 continue
-            batch.append(("oura", "heart_rate", ts, None, float(bpm), None))
+            batch.append(("oura", "heart_rate", _to_utc(ts), None, float(bpm), None))
 
         if batch:
             await conn.executemany(
