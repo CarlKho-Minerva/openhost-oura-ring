@@ -165,7 +165,6 @@ async def _sync_sleep(client, headers, start_date, end_date):
                 "efficiency": "efficiency",
                 "latency": "latency",
                 "restless_periods": "restless_periods",
-                "total_sleep_duration": "total_sleep_duration",
             }
             metrics = []
             for metric_name, field in metric_fields.items():
