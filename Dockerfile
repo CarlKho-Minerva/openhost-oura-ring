@@ -2,12 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir \
-    "litestar>=2.0" \
-    "hypercorn>=0.17" \
-    "httpx>=0.27" \
-    "aiosqlite>=0.20" \
-    "jinja2>=3.1"
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
