@@ -1,12 +1,15 @@
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
 WORKDIR /app
-COPY pyproject.toml .
-RUN uv sync --no-install-project
+
+RUN pip install --no-cache-dir \
+    "litestar>=2.0" \
+    "hypercorn>=0.17" \
+    "httpx>=0.27" \
+    "aiosqlite>=0.20" \
+    "jinja2>=3.1"
 
 COPY . .
 
 EXPOSE 8080
-CMD ["uv", "run", "hypercorn", "app:app", "--bind", "0.0.0.0:8080"]
+CMD ["hypercorn", "app:app", "--bind", "0.0.0.0:8080"]
