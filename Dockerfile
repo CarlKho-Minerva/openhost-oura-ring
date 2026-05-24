@@ -9,4 +9,4 @@ RUN uv sync --no-install-project
 COPY . .
 
 EXPOSE 8080
-CMD ["uv", "run", "hypercorn", "app:app", "--bind", "0.0.0.0:8080"]
+CMD ["uv", "run", "hypercorn", "health_data.app:app", "--bind", "0.0.0.0:8080"]

@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
-import db
+from . import db
 
 log = logging.getLogger(__name__)
 

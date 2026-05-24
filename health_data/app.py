@@ -9,8 +9,8 @@ from litestar import Litestar, Request, get, post
 from litestar.response import Redirect, Response
 from litestar.exceptions import NotFoundException
 
-import db
-import oura
+from . import db
+from . import oura
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
