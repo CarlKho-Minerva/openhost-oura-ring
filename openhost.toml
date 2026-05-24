@@ -1,0 +1,23 @@
+[app]
+name = "health-data"
+version = "0.1.0"
+description = "Health data aggregator - syncs wearable data and exposes a generic health API"
+
+[runtime.container]
+image = "Dockerfile"
+port = 8080
+
+[routing]
+health_check = "/health"
+
+[resources]
+memory_mb = 256
+cpu_millicores = 200
+
+[data]
+sqlite = ["health"]
+
+[[services.v2.provides]]
+service = "github.com/zack/services/health-data"
+version = "0.1.0"
+endpoint = "/api/"
