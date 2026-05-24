@@ -4,7 +4,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml .
-RUN uv sync
+RUN uv sync --no-install-project
 
 COPY . .
 
