@@ -486,14 +486,19 @@ async function doSync() {
 
 async function loadDashboard() {
   const [sessions, daily] = await Promise.all([
-    fetchJSON('/api/v1/sleep-sessions?limit=30'),
+    fetchJSON('/api/v1/sleep-sessions?limit=60'),
     fetchJSON('/api/v1/daily'),
   ]);
 
-  const sess = sessions.data.slice().reverse();
+  const allSess = sessions.data.slice().reverse();
+  // Filter out junk micro-sessions (< 30 min sleep)
+  const sess = allSess.filter(s => (s.metrics.total_sleep_duration || 0) >= 1800);
   const dailyData = daily.data;
 
-  // Summary stats
+  // Find last real sleep session for "last night" charts
+  const lastReal = sessions.data.find(s => (s.metrics.total_sleep_duration || 0) >= 1800);
+
+  // Summary stats (from last 7 real sessions)
   if (sess.length > 0) {
     const recent = sess.slice(-7);
     const avgSleep = recent.reduce((s, d) => s + (d.metrics.total_sleep_duration || 0), 0) / recent.length;
@@ -526,17 +531,22 @@ async function loadDashboard() {
     });
   }
 
-  // Readiness + sleep scores
-  const readiness = dailyData.filter(d => d.metric === 'readiness_score').sort((a,b) => a.date.localeCompare(b.date));
-  const sleepScores = dailyData.filter(d => d.metric === 'sleep_score').sort((a,b) => a.date.localeCompare(b.date));
-  if (readiness.length > 0 || sleepScores.length > 0) {
+  // Readiness + sleep scores (date-aligned)
+  const readinessMap = {};
+  const sleepScoreMap = {};
+  dailyData.forEach(d => {
+    if (d.metric === 'readiness_score') readinessMap[d.date] = d.value;
+    if (d.metric === 'sleep_score') sleepScoreMap[d.date] = d.value;
+  });
+  const allDates = [...new Set([...Object.keys(readinessMap), ...Object.keys(sleepScoreMap)])].sort();
+  if (allDates.length > 0) {
     new Chart(document.getElementById('scores'), {
       type: 'line',
       data: {
-        labels: readiness.map(d => d.date),
+        labels: allDates,
         datasets: [
-          { label: 'Readiness', data: readiness.map(d => d.value), borderColor: CHART_COLORS.emerald, tension: 0.3, pointRadius: 2 },
-          { label: 'Sleep Score', data: sleepScores.map(d => d.value), borderColor: CHART_COLORS.purple, tension: 0.3, pointRadius: 2 },
+          { label: 'Readiness', data: allDates.map(d => readinessMap[d] ?? null), borderColor: CHART_COLORS.emerald, tension: 0.3, pointRadius: 2, spanGaps: true },
+          { label: 'Sleep Score', data: allDates.map(d => sleepScoreMap[d] ?? null), borderColor: CHART_COLORS.purple, tension: 0.3, pointRadius: 2, spanGaps: true },
         ],
       },
       options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 0, max: 100 } } },
@@ -551,8 +561,8 @@ async function loadDashboard() {
       data: {
         labels,
         datasets: [
-          { label: 'Avg HR', data: sess.map(s => s.metrics.average_heart_rate), borderColor: CHART_COLORS.rose, tension: 0.3, pointRadius: 2 },
-          { label: 'Lowest HR', data: sess.map(s => s.metrics.lowest_heart_rate), borderColor: CHART_COLORS.amber, tension: 0.3, pointRadius: 2 },
+          { label: 'Avg HR', data: sess.map(s => s.metrics.average_heart_rate ?? null), borderColor: CHART_COLORS.rose, tension: 0.3, pointRadius: 2, spanGaps: true },
+          { label: 'Lowest HR', data: sess.map(s => s.metrics.lowest_heart_rate ?? null), borderColor: CHART_COLORS.amber, tension: 0.3, pointRadius: 2, spanGaps: true },
         ],
       },
       options: chartDefaults,
@@ -567,7 +577,7 @@ async function loadDashboard() {
       data: {
         labels,
         datasets: [
-          { label: 'Avg HRV', data: sess.map(s => s.metrics.average_hrv), borderColor: CHART_COLORS.cyan, tension: 0.3, pointRadius: 2, fill: true, backgroundColor: 'rgba(6,182,212,0.1)' },
+          { label: 'Avg HRV', data: sess.map(s => s.metrics.average_hrv ?? null), borderColor: CHART_COLORS.cyan, tension: 0.3, pointRadius: 2, fill: true, backgroundColor: 'rgba(6,182,212,0.1)', spanGaps: true },
         ],
       },
       options: chartDefaults,
@@ -575,9 +585,8 @@ async function loadDashboard() {
   }
 
   // Last night HR samples
-  if (sess.length > 0) {
-    const last = sessions.data[0];
-    const hrSamples = await fetchJSON(`/api/v1/samples?metric=heart_rate&start=${last.start_ts}&end=${last.end_ts}&limit=500`);
+  if (lastReal) {
+    const hrSamples = await fetchJSON(`/api/v1/samples?metric=heart_rate&start=${lastReal.start_ts}&end=${lastReal.end_ts}&limit=500`);
     if (hrSamples.data.length > 0) {
       new Chart(document.getElementById('lastHr'), {
         type: 'line',
@@ -591,9 +600,8 @@ async function loadDashboard() {
   }
 
   // Last night sleep stages
-  if (sess.length > 0) {
-    const last = sessions.data[0];
-    const stages = await fetchJSON(`/api/v1/samples?metric=sleep_stage&start=${last.start_ts}&end=${last.end_ts}&limit=500`);
+  if (lastReal) {
+    const stages = await fetchJSON(`/api/v1/samples?metric=sleep_stage&start=${lastReal.start_ts}&end=${lastReal.end_ts}&limit=500`);
     if (stages.data.length > 0) {
       const stageLabels = { 1: 'Deep', 2: 'Light', 3: 'REM', 4: 'Awake' };
       const stageColors = { 1: CHART_COLORS.indigo, 2: CHART_COLORS.slate, 3: CHART_COLORS.cyan, 4: CHART_COLORS.amber };
