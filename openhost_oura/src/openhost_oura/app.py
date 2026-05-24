@@ -131,6 +131,17 @@ async def trigger_sync() -> dict:
         return {"status": "error", "detail": str(e)}
 
 
+@post("/reset-data")
+async def reset_data() -> dict:
+    async with db.connect() as conn:
+        await conn.execute("DELETE FROM samples")
+        await conn.execute("DELETE FROM sleep_session_metrics")
+        await conn.execute("DELETE FROM sleep_sessions")
+        await conn.execute("DELETE FROM daily_metrics")
+        await conn.commit()
+    return {"status": "cleared"}
+
+
 # ---------------------------------------------------------------------------
 # Health Data API (generic, source-agnostic)
 # ---------------------------------------------------------------------------
@@ -652,7 +663,7 @@ loadDashboard();
 app = Litestar(
     route_handlers=[
         health_check, index, setup_page, start_oauth, save_pat,
-        oauth_callback, trigger_sync,
+        oauth_callback, trigger_sync, reset_data,
         list_metrics, query_samples, query_sleep_sessions, query_daily,
     ],
     on_startup=[on_startup],
