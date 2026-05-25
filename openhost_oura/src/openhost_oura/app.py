@@ -592,7 +592,7 @@ async function loadDashboard(){
 
     html+='</div>';
   } else {
-    html+='<div class="section-title">Last Night\'s Sleep</div><div class="no-data">No sleep data available</div>';
+    html+='<div class="section-title">Last Night\\\'s Sleep</div><div class="no-data">No sleep data available</div>';
   }
   html+='</section>';
 
