@@ -423,28 +423,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Health Data</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-         background: #0f172a; color: #e2e8f0; padding: 1.5rem; }
+         background: #0f172a; color: #e2e8f0; padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
   h1 { font-size: 1.5rem; }
   .actions { display: flex; gap: 0.75rem; }
   .btn { padding: 0.4rem 1rem; border-radius: 6px; border: none; font-size: 0.8rem;
-         font-weight: 600; cursor: pointer; text-decoration: none; }
-  .btn-primary { background: #6366f1; color: white; }
+         font-weight: 600; cursor: pointer; text-decoration: none; color: white; }
+  .btn-primary { background: #6366f1; }
   .btn-secondary { background: #334155; color: #e2e8f0; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 1rem; }
+  section { margin-bottom: 2rem; }
+  .section-title { font-size: 1.15rem; font-weight: 600; margin-bottom: 0.75rem; display: flex; align-items: baseline; gap: 0.6rem; }
+  .section-title .date { font-size: 0.85rem; color: #64748b; font-weight: 400; }
+  .no-data { color: #475569; font-size: 0.9rem; padding: 1rem 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
   .card { background: #1e293b; border-radius: 12px; padding: 1.25rem; }
-  .card h2 { font-size: 1rem; color: #94a3b8; margin-bottom: 0.75rem; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem;
-           margin-bottom: 1rem; }
-  .stat { background: #1e293b; border-radius: 10px; padding: 1rem; text-align: center; }
-  .stat .value { font-size: 1.75rem; font-weight: 700; }
-  .stat .label { font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem; }
+  .card h3 { font-size: 0.85rem; color: #64748b; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.5rem; }
+  .metric { padding: 0.6rem; background: #0f172a; border-radius: 8px; }
+  .metric .val { font-size: 1.25rem; font-weight: 700; }
+  .metric .lbl { font-size: 0.7rem; color: #64748b; margin-top: 0.15rem; }
+  .score-ring { display: inline-flex; align-items: center; justify-content: center;
+    width: 56px; height: 56px; border-radius: 50%; font-size: 1.3rem; font-weight: 700; }
+  .score-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem; }
+  .score-label { font-size: 0.8rem; color: #94a3b8; }
+  .contrib-bar { height: 6px; border-radius: 3px; background: #334155; margin-top: 0.25rem; }
+  .contrib-fill { height: 100%; border-radius: 3px; }
+  .contrib-item { margin-bottom: 0.5rem; }
+  .contrib-head { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; }
   canvas { width: 100% !important; }
-  .loading { text-align: center; padding: 3rem; color: #64748b; }
 </style>
 </head>
 <body>
@@ -455,198 +464,248 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <a class="btn btn-secondary" href="/setup">Settings</a>
   </div>
 </div>
-
-<div class="stats" id="stats"></div>
-<div class="grid">
-  <div class="card"><h2>Sleep Duration</h2><canvas id="sleepDuration"></canvas></div>
-  <div class="card"><h2>Readiness &amp; Sleep Score</h2><canvas id="scores"></canvas></div>
-  <div class="card"><h2>Sleeping Heart Rate</h2><canvas id="hrChart"></canvas></div>
-  <div class="card"><h2>Sleeping HRV</h2><canvas id="hrvChart"></canvas></div>
-  <div class="card"><h2>Last Night - Heart Rate</h2><canvas id="lastHr"></canvas></div>
-  <div class="card"><h2>Last Night - Sleep Stages</h2><canvas id="lastStages"></canvas></div>
-</div>
+<div id="app"></div>
 
 <script>
-const CHART_COLORS = {
-  indigo: '#6366f1', cyan: '#06b6d4', emerald: '#10b981', amber: '#f59e0b',
-  rose: '#f43f5e', purple: '#a855f7', slate: '#64748b',
-};
-const chartDefaults = {
-  responsive: true,
-  plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
-  scales: {
-    x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#1e293b' } },
-    y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#1e293b' } },
+const C = { indigo:'#6366f1', cyan:'#06b6d4', emerald:'#10b981', amber:'#f59e0b',
+            rose:'#f43f5e', purple:'#a855f7', slate:'#64748b', sky:'#38bdf8' };
+const chartOpts = {
+  responsive:true,
+  plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}},
+  scales:{
+    x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'#1e293b'}},
+    y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'#1e293b'}},
   },
 };
+async function fetchJSON(u){return(await fetch(u)).json();}
+function toH(s){return(s/3600).toFixed(1);}
+function toHM(s){const h=Math.floor(s/3600),m=Math.round((s%3600)/60);return h>0?h+'h '+m+'m':m+'m';}
+function scoreColor(v){return v>=85?C.emerald:v>=70?C.amber:C.rose;}
 
-async function fetchJSON(url) {
-  const r = await fetch(url);
-  return r.json();
+function getToday(){
+  // Day boundary at 3am Pacific (UTC-7 or UTC-8 DST)
+  const now=new Date();
+  const pac=new Date(now.toLocaleString('en-US',{timeZone:'America/Los_Angeles'}));
+  if(pac.getHours()<3) pac.setDate(pac.getDate()-1);
+  return pac.toISOString().slice(0,10);
+}
+const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+function fmtDate(iso){
+  const d=new Date(iso+'T12:00:00');
+  return DAYS[d.getDay()]+', '+d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
 }
 
-function toHours(sec) { return (sec / 3600).toFixed(1); }
-
-async function doSync() {
-  const btn = document.querySelector('.btn-primary');
-  btn.textContent = 'Syncing...';
-  btn.disabled = true;
-  try {
-    await fetch('/sync', { method: 'POST' });
-    location.reload();
-  } catch(e) {
-    btn.textContent = 'Sync Failed';
-    setTimeout(() => { btn.textContent = 'Sync Now'; btn.disabled = false; }, 2000);
-  }
+async function doSync(){
+  const b=document.querySelector('.btn-primary');b.textContent='Syncing...';b.disabled=true;
+  try{await fetch('/sync',{method:'POST'});location.reload();}
+  catch(e){b.textContent='Sync Failed';setTimeout(()=>{b.textContent='Sync Now';b.disabled=false;},2000);}
 }
 
-async function loadDashboard() {
-  const [sessions, daily] = await Promise.all([
+function contribBar(label,val,color){
+  if(val==null)return'';
+  return `<div class="contrib-item"><div class="contrib-head"><span>${label}</span><span>${Math.round(val)}</span></div><div class="contrib-bar"><div class="contrib-fill" style="width:${val}%;background:${color}"></div></div></div>`;
+}
+
+async function loadDashboard(){
+  const [sessions,daily]=await Promise.all([
     fetchJSON('/api/v1/sleep-sessions?limit=60'),
     fetchJSON('/api/v1/daily'),
   ]);
+  const allSess=sessions.data.slice().reverse();
+  const sess=allSess.filter(s=>(s.metrics.total_sleep_duration||0)>=1800);
+  const dailyData=daily.data;
+  const today=getToday();
 
-  const allSess = sessions.data.slice().reverse();
-  // Filter out junk micro-sessions (< 30 min sleep)
-  const sess = allSess.filter(s => (s.metrics.total_sleep_duration || 0) >= 1800);
-  const dailyData = daily.data;
-
-  // Find last real sleep session for "last night" charts
-  const lastReal = sessions.data.find(s => (s.metrics.total_sleep_duration || 0) >= 1800);
-
-  // Summary stats (from last 7 real sessions)
-  if (sess.length > 0) {
-    const recent = sess.slice(-7);
-    const avgSleep = recent.reduce((s, d) => s + (d.metrics.total_sleep_duration || 0), 0) / recent.length;
-    const avgHR = recent.reduce((s, d) => s + (d.metrics.average_heart_rate || 0), 0) / recent.length;
-    const avgHRV = recent.reduce((s, d) => s + (d.metrics.average_hrv || 0), 0) / recent.length;
-    const avgEff = recent.reduce((s, d) => s + (d.metrics.efficiency || 0), 0) / recent.length;
-
-    document.getElementById('stats').innerHTML = [
-      { value: toHours(avgSleep) + 'h', label: 'Avg Sleep (7d)' },
-      { value: Math.round(avgHR) + ' bpm', label: 'Avg Sleeping HR' },
-      { value: Math.round(avgHRV) + ' ms', label: 'Avg Sleeping HRV' },
-      { value: Math.round(avgEff) + '%', label: 'Avg Efficiency' },
-    ].map(s => `<div class="stat"><div class="value">${s.value}</div><div class="label">${s.label}</div></div>`).join('');
+  // Find last real sleep session
+  const lastReal=sessions.data.find(s=>(s.metrics.total_sleep_duration||0)>=1800);
+  // Determine the "day" this session belongs to (end time, 3am boundary)
+  let lastNightDay=null;
+  if(lastReal){
+    const end=new Date(lastReal.end_ts);
+    const endPac=new Date(end.toLocaleString('en-US',{timeZone:'America/Los_Angeles'}));
+    if(endPac.getHours()<3) endPac.setDate(endPac.getDate()-1);
+    lastNightDay=endPac.toISOString().slice(0,10);
   }
 
-  // Sleep duration stacked bar
-  if (sess.length > 0) {
-    const labels = sess.map(s => s.start_ts.slice(0, 10));
-    new Chart(document.getElementById('sleepDuration'), {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          { label: 'Deep', data: sess.map(s => toHours(s.metrics.deep_sleep_duration || 0)), backgroundColor: CHART_COLORS.indigo },
-          { label: 'REM', data: sess.map(s => toHours(s.metrics.rem_sleep_duration || 0)), backgroundColor: CHART_COLORS.cyan },
-          { label: 'Light', data: sess.map(s => toHours(s.metrics.light_sleep_duration || 0)), backgroundColor: CHART_COLORS.slate },
-        ],
-      },
-      options: { ...chartDefaults, scales: { ...chartDefaults.scales, x: { ...chartDefaults.scales.x, stacked: true }, y: { ...chartDefaults.scales.y, stacked: true, title: { display: true, text: 'Hours', color: '#64748b' } } } },
-    });
-  }
-
-  // Readiness + sleep scores (date-aligned)
-  const readinessMap = {};
-  const sleepScoreMap = {};
-  dailyData.forEach(d => {
-    if (d.metric === 'readiness_score') readinessMap[d.date] = d.value;
-    if (d.metric === 'sleep_score') sleepScoreMap[d.date] = d.value;
+  // Build daily metrics lookup by date
+  const byDate={};
+  dailyData.forEach(d=>{
+    if(!byDate[d.date])byDate[d.date]={};
+    byDate[d.date][d.metric]=d.value;
   });
-  const allDates = [...new Set([...Object.keys(readinessMap), ...Object.keys(sleepScoreMap)])].sort();
-  if (allDates.length > 0) {
-    new Chart(document.getElementById('scores'), {
-      type: 'line',
-      data: {
-        labels: allDates,
-        datasets: [
-          { label: 'Readiness', data: allDates.map(d => readinessMap[d] ?? null), borderColor: CHART_COLORS.emerald, tension: 0.3, pointRadius: 2, spanGaps: true },
-          { label: 'Sleep Score', data: allDates.map(d => sleepScoreMap[d] ?? null), borderColor: CHART_COLORS.purple, tension: 0.3, pointRadius: 2, spanGaps: true },
-        ],
-      },
-      options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 0, max: 100 } } },
-    });
-  }
+  const todayMetrics=byDate[today]||null;
+  // If no data for today, check yesterday
+  const yesterdayISO=new Date(new Date(today+'T12:00:00').getTime()-86400000).toISOString().slice(0,10);
 
-  // Sleeping HR trend
-  if (sess.length > 0) {
-    const labels = sess.map(s => s.start_ts.slice(0, 10));
-    new Chart(document.getElementById('hrChart'), {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          { label: 'Avg HR', data: sess.map(s => s.metrics.average_heart_rate ?? null), borderColor: CHART_COLORS.rose, tension: 0.3, pointRadius: 2, spanGaps: true },
-          { label: 'Lowest HR', data: sess.map(s => s.metrics.lowest_heart_rate ?? null), borderColor: CHART_COLORS.amber, tension: 0.3, pointRadius: 2, spanGaps: true },
-        ],
-      },
-      options: chartDefaults,
-    });
-  }
+  let html='';
 
-  // Sleeping HRV trend
-  if (sess.length > 0) {
-    const labels = sess.map(s => s.start_ts.slice(0, 10));
-    new Chart(document.getElementById('hrvChart'), {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          { label: 'Avg HRV', data: sess.map(s => s.metrics.average_hrv ?? null), borderColor: CHART_COLORS.cyan, tension: 0.3, pointRadius: 2, fill: true, backgroundColor: 'rgba(6,182,212,0.1)', spanGaps: true },
-        ],
-      },
-      options: chartDefaults,
-    });
-  }
+  // ---- LAST NIGHT'S SLEEP ----
+  html+='<section id="last-night">';
+  if(lastReal){
+    const isToday=lastNightDay===today;
+    html+=`<div class="section-title">Last Night's Sleep <span class="date">${fmtDate(lastNightDay)}${isToday?'':' (not current)'}</span></div>`;
+    const m=lastReal.metrics;
+    const sleepScore=byDate[lastNightDay]?.sleep_score;
 
-  // Last night HR samples
-  if (lastReal) {
-    const hrSamples = await fetchJSON(`/api/v1/samples?metric=heart_rate&session_id=${lastReal.id}&limit=500`);
-    if (hrSamples.data.length > 0) {
-      new Chart(document.getElementById('lastHr'), {
-        type: 'line',
-        data: {
-          labels: hrSamples.data.map(d => new Date(d.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})),
-          datasets: [{ label: 'HR (bpm)', data: hrSamples.data.map(d => d.value), borderColor: CHART_COLORS.rose, tension: 0.3, pointRadius: 0 }],
-        },
-        options: chartDefaults,
-      });
+    html+='<div class="grid">';
+
+    // Sleep stats card
+    html+='<div class="card"><h3>Sleep Summary</h3>';
+    if(sleepScore!=null){
+      html+=`<div class="score-row"><div class="score-ring" style="border:3px solid ${scoreColor(sleepScore)}">${Math.round(sleepScore)}</div><div><div style="font-weight:600">Sleep Score</div><div class="score-label">Total: ${toHM(m.total_sleep_duration||0)}</div></div></div>`;
+    }
+    html+='<div class="metrics">';
+    const stats=[
+      ['Total Sleep',toHM(m.total_sleep_duration||0)],
+      ['Deep',toHM(m.deep_sleep_duration||0)],
+      ['REM',toHM(m.rem_sleep_duration||0)],
+      ['Light',toHM(m.light_sleep_duration||0)],
+      ['Awake',toHM(m.awake_time||0)],
+      ['Time in Bed',toHM(m.time_in_bed||0)],
+      ['Avg HR',m.average_heart_rate!=null?Math.round(m.average_heart_rate)+' bpm':'--'],
+      ['Lowest HR',m.lowest_heart_rate!=null?Math.round(m.lowest_heart_rate)+' bpm':'--'],
+      ['Avg HRV',m.average_hrv!=null?Math.round(m.average_hrv)+' ms':'--'],
+      ['Avg Breath',m.average_breath!=null?m.average_breath.toFixed(1)+'/min':'--'],
+      ['Efficiency',m.efficiency!=null?Math.round(m.efficiency)+'%':'--'],
+      ['Latency',m.latency!=null?toHM(m.latency):'--'],
+    ];
+    stats.forEach(([l,v])=>html+=`<div class="metric"><div class="val">${v}</div><div class="lbl">${l}</div></div>`);
+    html+='</div>';
+
+    // Sleep score contributors
+    const sc=byDate[lastNightDay]||{};
+    const contribs=[['Deep Sleep','sleep_score_deep_sleep'],['REM Sleep','sleep_score_rem_sleep'],
+      ['Total Sleep','sleep_score_total_sleep'],['Efficiency','sleep_score_efficiency'],
+      ['Restfulness','sleep_score_restfulness'],['Latency','sleep_score_latency'],['Timing','sleep_score_timing']];
+    const hasContribs=contribs.some(([,k])=>sc[k]!=null);
+    if(hasContribs){
+      html+='<h3 style="margin-top:1rem">Score Breakdown</h3>';
+      contribs.forEach(([label,key])=>html+=contribBar(label,sc[key],C.purple));
+    }
+    html+='</div>';
+
+    // Charts card
+    html+='<div class="card"><h3>Sleep Stages</h3><canvas id="lastStages"></canvas>';
+    html+='<h3 style="margin-top:1rem">Heart Rate</h3><canvas id="lastHr"></canvas>';
+    html+='<h3 style="margin-top:1rem">HRV</h3><canvas id="lastHrv"></canvas>';
+    html+='</div>';
+
+    html+='</div>';
+  } else {
+    html+='<div class="section-title">Last Night\'s Sleep</div><div class="no-data">No sleep data available</div>';
+  }
+  html+='</section>';
+
+  // ---- TODAY ----
+  html+='<section id="today">';
+  if(todayMetrics){
+    html+=`<div class="section-title">Today <span class="date">${fmtDate(today)}</span></div>`;
+    html+='<div class="grid">';
+
+    // Readiness card
+    html+='<div class="card"><h3>Readiness</h3>';
+    const rs=todayMetrics.readiness_score;
+    if(rs!=null){
+      html+=`<div class="score-row"><div class="score-ring" style="border:3px solid ${scoreColor(rs)}">${Math.round(rs)}</div><div style="font-weight:600">Readiness Score</div></div>`;
+    }
+    const rContribs=[['Resting HR','readiness_resting_heart_rate'],['HRV Balance','readiness_hrv_balance'],
+      ['Body Temperature','readiness_body_temperature'],['Recovery Index','readiness_recovery_index'],
+      ['Previous Night','readiness_previous_night'],['Sleep Balance','readiness_sleep_balance'],
+      ['Activity Balance','readiness_activity_balance'],['Sleep Regularity','readiness_sleep_regularity']];
+    rContribs.forEach(([label,key])=>html+=contribBar(label,todayMetrics[key],C.emerald));
+    html+='</div>';
+
+    // Body signals card
+    html+='<div class="card"><h3>Body Signals</h3><div class="metrics">';
+    const tempDev=todayMetrics.temperature_deviation;
+    const tempTrend=todayMetrics.temperature_trend_deviation;
+    if(tempDev!=null) html+=`<div class="metric"><div class="val">${tempDev>0?'+':''}${tempDev.toFixed(2)}&deg;</div><div class="lbl">Temp Deviation</div></div>`;
+    if(tempTrend!=null) html+=`<div class="metric"><div class="val">${tempTrend>0?'+':''}${tempTrend.toFixed(2)}&deg;</div><div class="lbl">Temp Trend</div></div>`;
+    html+='</div></div>';
+
+    html+='</div>';
+  } else {
+    html+=`<div class="section-title">Today <span class="date">${fmtDate(today)}</span></div><div class="no-data">No data for today yet. Data usually appears after your first sync of the day.</div>`;
+  }
+  html+='</section>';
+
+  // ---- HISTORY ----
+  html+='<section id="history">';
+  html+='<div class="section-title">History</div>';
+  html+='<div class="grid">';
+  html+='<div class="card"><h3>Sleep Duration</h3><canvas id="sleepDuration"></canvas></div>';
+  html+='<div class="card"><h3>Readiness &amp; Sleep Score</h3><canvas id="scores"></canvas></div>';
+  html+='<div class="card"><h3>Sleeping Heart Rate</h3><canvas id="hrChart"></canvas></div>';
+  html+='<div class="card"><h3>Sleeping HRV</h3><canvas id="hrvChart"></canvas></div>';
+  html+='</div></section>';
+
+  document.getElementById('app').innerHTML=html;
+
+  // ---- RENDER CHARTS ----
+
+  // Last night charts
+  if(lastReal){
+    const [hrData,hrvData,stageData]=await Promise.all([
+      fetchJSON(`/api/v1/samples?metric=heart_rate&session_id=${lastReal.id}&limit=500`),
+      fetchJSON(`/api/v1/samples?metric=hrv&session_id=${lastReal.id}&limit=500`),
+      fetchJSON(`/api/v1/samples?metric=sleep_stage&session_id=${lastReal.id}&limit=500`),
+    ]);
+    const timeFmt=d=>new Date(d.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'});
+
+    if(stageData.data.length>0){
+      const sLabels={1:'Deep',2:'Light',3:'REM',4:'Awake'};
+      const sColors={1:C.indigo,2:C.slate,3:C.cyan,4:C.amber};
+      new Chart(document.getElementById('lastStages'),{type:'bar',
+        data:{labels:stageData.data.map(timeFmt),datasets:[{data:stageData.data.map(d=>d.value),backgroundColor:stageData.data.map(d=>sColors[d.value]||'#64748b'),barPercentage:1,categoryPercentage:1}]},
+        options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false},tooltip:{callbacks:{label:c=>sLabels[c.raw]||c.raw}}},scales:{...chartOpts.scales,y:{...chartOpts.scales.y,min:0.5,max:4.5,ticks:{...chartOpts.scales.y.ticks,callback:v=>sLabels[v]||''}}}}});
+    }
+    if(hrData.data.length>0){
+      new Chart(document.getElementById('lastHr'),{type:'line',
+        data:{labels:hrData.data.map(timeFmt),datasets:[{label:'bpm',data:hrData.data.map(d=>d.value),borderColor:C.rose,tension:0.3,pointRadius:0,borderWidth:1.5}]},
+        options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false}}}});
+    }
+    if(hrvData.data.length>0){
+      new Chart(document.getElementById('lastHrv'),{type:'line',
+        data:{labels:hrvData.data.map(timeFmt),datasets:[{label:'ms',data:hrvData.data.map(d=>d.value),borderColor:C.cyan,tension:0.3,pointRadius:0,borderWidth:1.5,fill:true,backgroundColor:'rgba(6,182,212,0.08)'}]},
+        options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false}}}});
     }
   }
 
-  // Last night sleep stages
-  if (lastReal) {
-    const stages = await fetchJSON(`/api/v1/samples?metric=sleep_stage&session_id=${lastReal.id}&limit=500`);
-    if (stages.data.length > 0) {
-      const stageLabels = { 1: 'Deep', 2: 'Light', 3: 'REM', 4: 'Awake' };
-      const stageColors = { 1: CHART_COLORS.indigo, 2: CHART_COLORS.slate, 3: CHART_COLORS.cyan, 4: CHART_COLORS.amber };
-      new Chart(document.getElementById('lastStages'), {
-        type: 'bar',
-        data: {
-          labels: stages.data.map(d => new Date(d.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})),
-          datasets: [{
-            label: 'Stage',
-            data: stages.data.map(d => d.value),
-            backgroundColor: stages.data.map(d => stageColors[d.value] || '#64748b'),
-          }],
-        },
-        options: {
-          ...chartDefaults,
-          plugins: {
-            ...chartDefaults.plugins,
-            tooltip: {
-              callbacks: { label: ctx => stageLabels[ctx.raw] || ctx.raw }
-            }
-          },
-          scales: {
-            ...chartDefaults.scales,
-            y: { ...chartDefaults.scales.y, min: 0.5, max: 4.5,
-              ticks: { ...chartDefaults.scales.y.ticks, callback: v => stageLabels[v] || '' } },
-          },
-        },
-      });
-    }
+  // History charts
+  if(sess.length>0){
+    const labels=sess.map(s=>s.start_ts.slice(5,10));
+    new Chart(document.getElementById('sleepDuration'),{type:'bar',
+      data:{labels,datasets:[
+        {label:'Deep',data:sess.map(s=>+(toH(s.metrics.deep_sleep_duration||0))),backgroundColor:C.indigo},
+        {label:'REM',data:sess.map(s=>+(toH(s.metrics.rem_sleep_duration||0))),backgroundColor:C.cyan},
+        {label:'Light',data:sess.map(s=>+(toH(s.metrics.light_sleep_duration||0))),backgroundColor:C.slate},
+      ]},options:{...chartOpts,scales:{...chartOpts.scales,x:{...chartOpts.scales.x,stacked:true},y:{...chartOpts.scales.y,stacked:true}}}});
+
+    new Chart(document.getElementById('hrChart'),{type:'line',
+      data:{labels,datasets:[
+        {label:'Avg',data:sess.map(s=>s.metrics.average_heart_rate??null),borderColor:C.rose,tension:0.3,pointRadius:2,spanGaps:true},
+        {label:'Low',data:sess.map(s=>s.metrics.lowest_heart_rate??null),borderColor:C.amber,tension:0.3,pointRadius:2,spanGaps:true},
+      ]},options:chartOpts});
+
+    new Chart(document.getElementById('hrvChart'),{type:'line',
+      data:{labels,datasets:[
+        {label:'Avg HRV',data:sess.map(s=>s.metrics.average_hrv??null),borderColor:C.cyan,tension:0.3,pointRadius:2,spanGaps:true,fill:true,backgroundColor:'rgba(6,182,212,0.08)'},
+      ]},options:chartOpts});
+  }
+
+  // Scores chart
+  const readinessMap={},sleepScoreMap={};
+  dailyData.forEach(d=>{
+    if(d.metric==='readiness_score')readinessMap[d.date]=d.value;
+    if(d.metric==='sleep_score')sleepScoreMap[d.date]=d.value;
+  });
+  const allDates=[...new Set([...Object.keys(readinessMap),...Object.keys(sleepScoreMap)])].sort();
+  if(allDates.length>0){
+    new Chart(document.getElementById('scores'),{type:'line',
+      data:{labels:allDates.map(d=>d.slice(5)),datasets:[
+        {label:'Readiness',data:allDates.map(d=>readinessMap[d]??null),borderColor:C.emerald,tension:0.3,pointRadius:2,spanGaps:true},
+        {label:'Sleep',data:allDates.map(d=>sleepScoreMap[d]??null),borderColor:C.purple,tension:0.3,pointRadius:2,spanGaps:true},
+      ]},options:{...chartOpts,scales:{...chartOpts.scales,y:{...chartOpts.scales.y,min:50,max:100}}}});
   }
 }
 
