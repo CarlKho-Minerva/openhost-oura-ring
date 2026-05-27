@@ -1,5 +1,5 @@
 [app]
-name = "health-data"
+name = "oura"
 version = "0.1.0"
 description = "Health data aggregator - syncs wearable data and exposes a generic health API"
 
