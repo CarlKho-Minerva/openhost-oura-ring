@@ -25,8 +25,8 @@ def test_api_metrics_empty(stack):
     assert "metrics" in r.json()
 
 
-def test_api_samples_requires_metric(stack):
-    r = httpx.get(f"{stack.url}/api/v1/samples")
+def test_api_time_series_requires_metric(stack):
+    r = httpx.get(f"{stack.url}/api/v1/time-series")
     assert r.status_code == 200
     body = r.json()
     assert "error" in body
@@ -35,10 +35,10 @@ def test_api_samples_requires_metric(stack):
 def test_api_sleep_sessions_empty(stack):
     r = httpx.get(f"{stack.url}/api/v1/sleep-sessions")
     assert r.status_code == 200
-    assert r.json()["count"] == 0
+    assert r.json()["data"] == []
 
 
-def test_api_daily_empty(stack):
-    r = httpx.get(f"{stack.url}/api/v1/daily")
+def test_api_workouts_empty(stack):
+    r = httpx.get(f"{stack.url}/api/v1/workouts")
     assert r.status_code == 200
-    assert r.json()["count"] == 0
+    assert r.json()["data"] == []

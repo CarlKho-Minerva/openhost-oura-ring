@@ -11,6 +11,7 @@ from litestar.exceptions import NotFoundException
 
 from . import db
 from . import oura
+from .service_api import service_routes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -129,177 +130,6 @@ async def reset_data() -> dict:
     return {"status": "cleared"}
 
 
-# ---------------------------------------------------------------------------
-# Health Data API (generic, source-agnostic)
-# ---------------------------------------------------------------------------
-
-@get("/api/v1/metrics")
-async def list_metrics() -> dict:
-    async with db.connect() as conn:
-        rows = await (await conn.execute(
-            """SELECT DISTINCT metric, 'sample' as type FROM samples
-               UNION SELECT DISTINCT metric, 'sleep_session' FROM sleep_session_metrics
-               UNION SELECT DISTINCT metric, 'daily' FROM daily_metrics
-               ORDER BY type, metric"""
-        )).fetchall()
-    return {"metrics": [{"name": r[0], "type": r[1]} for r in rows]}
-
-
-@get("/api/v1/samples")
-async def query_samples(request: Request) -> dict:
-    metric = request.query_params.get("metric")
-    start = request.query_params.get("start")
-    end = request.query_params.get("end")
-    limit = int(request.query_params.get("limit", "10000"))
-    agg = request.query_params.get("agg")
-    interval = request.query_params.get("interval")
-
-    if not metric:
-        return {"error": "metric parameter required"}
-
-    if agg and interval:
-        return await _aggregated_samples(metric, start, end, agg, interval)
-
-    session_id = request.query_params.get("session_id")
-
-    conditions = ["metric = ?"]
-    params: list = [metric]
-    if session_id:
-        conditions.append("sleep_session_id = ?")
-        params.append(int(session_id))
-    if start:
-        conditions.append("start_ts >= ?")
-        params.append(start)
-    if end:
-        conditions.append("start_ts <= ?")
-        params.append(end)
-    params.append(limit)
-
-    where = " AND ".join(conditions)
-    async with db.connect() as conn:
-        rows = await (await conn.execute(
-            f"""SELECT start_ts, end_ts, value FROM samples
-                WHERE {where} ORDER BY start_ts LIMIT ?""",
-            params,
-        )).fetchall()
-
-    return {
-        "metric": metric,
-        "count": len(rows),
-        "data": [{"ts": r[0], "end_ts": r[1], "value": r[2]} for r in rows],
-    }
-
-
-async def _aggregated_samples(metric, start, end, agg, interval):
-    agg_fn = {"avg": "AVG", "min": "MIN", "max": "MAX", "sum": "SUM", "count": "COUNT"}.get(agg)
-    if not agg_fn:
-        return {"error": f"Unknown aggregation: {agg}"}
-
-    trunc = {
-        "5m": "%Y-%m-%dT%H:%M", "1h": "%Y-%m-%dT%H", "1d": "%Y-%m-%d",
-    }.get(interval)
-    if not trunc:
-        return {"error": f"Unknown interval: {interval}. Use 5m, 1h, or 1d"}
-
-    conditions = ["metric = ?"]
-    params: list = [metric]
-    if start:
-        conditions.append("start_ts >= ?")
-        params.append(start)
-    if end:
-        conditions.append("start_ts <= ?")
-        params.append(end)
-    where = " AND ".join(conditions)
-
-    async with db.connect() as conn:
-        rows = await (await conn.execute(
-            f"""SELECT strftime('{trunc}', start_ts) as bucket,
-                       {agg_fn}(value) as val, COUNT(*) as n
-                FROM samples WHERE {where}
-                GROUP BY bucket ORDER BY bucket""",
-            params,
-        )).fetchall()
-
-    return {
-        "metric": metric,
-        "aggregation": agg,
-        "interval": interval,
-        "count": len(rows),
-        "data": [{"ts": r[0], "value": r[1], "n": r[2]} for r in rows],
-    }
-
-
-@get("/api/v1/sleep-sessions")
-async def query_sleep_sessions(request: Request) -> dict:
-    start = request.query_params.get("start")
-    end = request.query_params.get("end")
-    limit = int(request.query_params.get("limit", "100"))
-
-    conditions = []
-    params: list = []
-    if start:
-        conditions.append("s.start_ts >= ?")
-        params.append(start)
-    if end:
-        conditions.append("s.end_ts <= ?")
-        params.append(end)
-    params.append(limit)
-
-    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
-    async with db.connect() as conn:
-        sessions = await (await conn.execute(
-            f"""SELECT s.id, s.source, s.source_id, s.start_ts, s.end_ts
-                FROM sleep_sessions s {where}
-                ORDER BY s.start_ts DESC LIMIT ?""",
-            params,
-        )).fetchall()
-
-        result = []
-        for s in sessions:
-            metrics = await (await conn.execute(
-                "SELECT metric, value FROM sleep_session_metrics WHERE sleep_session_id = ?",
-                (s[0],),
-            )).fetchall()
-            result.append({
-                "id": s[0],
-                "source": s[1],
-                "start_ts": s[3],
-                "end_ts": s[4],
-                "metrics": {m[0]: m[1] for m in metrics},
-            })
-
-    return {"count": len(result), "data": result}
-
-
-@get("/api/v1/daily")
-async def query_daily(request: Request) -> dict:
-    metric = request.query_params.get("metric")
-    start = request.query_params.get("start")
-    end = request.query_params.get("end")
-
-    conditions = []
-    params: list = []
-    if metric:
-        conditions.append("metric = ?")
-        params.append(metric)
-    if start:
-        conditions.append("date >= ?")
-        params.append(start)
-    if end:
-        conditions.append("date <= ?")
-        params.append(end)
-
-    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
-    async with db.connect() as conn:
-        rows = await (await conn.execute(
-            f"SELECT date, metric, value FROM daily_metrics {where} ORDER BY date, metric",
-            params,
-        )).fetchall()
-
-    return {
-        "count": len(rows),
-        "data": [{"date": r[0], "metric": r[1], "value": r[2]} for r in rows],
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -484,81 +314,112 @@ function contribBar(label,val,color){
   return `<div class="contrib-item"><div class="contrib-head"><span>${label}</span><span>${Math.round(val)}</span></div><div class="contrib-bar"><div class="contrib-fill" style="width:${val}%;background:${color}"></div></div></div>`;
 }
 
+// Helpers for new service API format: scalar metrics are {value, ...} objects
+function sv(obj){return obj?obj.value:null;}
+function durMin(obj){return obj?obj.value:0;} // Duration scalars are in minutes
+
 async function loadDashboard(){
-  const [sessions,daily]=await Promise.all([
+  const [sessions,readinessTsResp,sleepScoreTsResp,tempDevResp,tempTrendResp]=await Promise.all([
     fetchJSON('/api/v1/sleep-sessions?limit=60'),
-    fetchJSON('/api/v1/daily'),
+    fetchJSON('/api/v1/time-series?metric=readiness_score'),
+    fetchJSON('/api/v1/time-series?metric=sleep_score'),
+    fetchJSON('/api/v1/time-series?metric=temperature_deviation'),
+    fetchJSON('/api/v1/time-series?metric=temperature_trend_deviation'),
   ]);
+
+  // Also fetch readiness contributors for today
+  const readinessContribMetrics=['readiness_activity_balance','readiness_body_temperature','readiness_hrv_balance',
+    'readiness_previous_day_activity','readiness_previous_night','readiness_recovery_index',
+    'readiness_resting_heart_rate','readiness_sleep_balance','readiness_sleep_regularity'];
+  const sleepScoreContribMetrics=['sleep_score_deep_sleep','sleep_score_efficiency','sleep_score_latency',
+    'sleep_score_rem_sleep','sleep_score_restfulness','sleep_score_timing','sleep_score_total_sleep'];
+
   const allSess=sessions.data.slice().reverse();
-  const sess=allSess.filter(s=>(s.metrics.total_sleep_duration||0)>=1800);
-  const dailyData=daily.data;
+  // Filter out junk micro-sessions (< 30 min = 0.5 in minutes)
+  const sess=allSess.filter(s=>durMin(s.total_duration)>=30);
   const today=getToday();
 
   // Find last real sleep session
-  const lastReal=sessions.data.find(s=>(s.metrics.total_sleep_duration||0)>=1800);
-  // Determine the "day" this session belongs to (end time, 3am boundary)
+  const lastReal=sessions.data.find(s=>durMin(s.total_duration)>=30);
   let lastNightDay=null;
   if(lastReal){
-    const end=new Date(lastReal.end_ts);
+    const end=new Date(lastReal.end);
     const endPac=new Date(end.toLocaleString('en-US',{timeZone:'America/Los_Angeles'}));
     if(endPac.getHours()<3) endPac.setDate(endPac.getDate()-1);
     lastNightDay=endPac.toISOString().slice(0,10);
   }
 
-  // Build daily metrics lookup by date
-  const byDate={};
-  dailyData.forEach(d=>{
-    if(!byDate[d.date])byDate[d.date]={};
-    byDate[d.date][d.metric]=d.value;
-  });
-  const todayMetrics=byDate[today]||null;
-  // If no data for today, check yesterday
-  const yesterdayISO=new Date(new Date(today+'T12:00:00').getTime()-86400000).toISOString().slice(0,10);
+  // Build daily lookups from time-series responses
+  const readinessMap={},sleepScoreMap={},tempDevMap={},tempTrendMap={};
+  (readinessTsResp.samples||[]).forEach(s=>{readinessMap[s.timestamp.slice(0,10)]=s.value;});
+  (sleepScoreTsResp.samples||[]).forEach(s=>{sleepScoreMap[s.timestamp.slice(0,10)]=s.value;});
+  (tempDevResp.samples||[]).forEach(s=>{tempDevMap[s.timestamp.slice(0,10)]=s.value;});
+  (tempTrendResp.samples||[]).forEach(s=>{tempTrendMap[s.timestamp.slice(0,10)]=s.value;});
+
+  // Fetch readiness contributors for today
+  const todayContribs={};
+  if(readinessMap[today]!=null){
+    const contribResults=await Promise.all(readinessContribMetrics.map(m=>fetchJSON(`/api/v1/time-series?metric=${m}`)));
+    readinessContribMetrics.forEach((m,i)=>{
+      const samples=contribResults[i].samples||[];
+      const todaySample=samples.find(s=>s.timestamp.slice(0,10)===today);
+      if(todaySample) todayContribs[m]=todaySample.value;
+    });
+  }
+
+  // Fetch sleep score contributors for last night
+  const sleepContribs={};
+  if(lastNightDay && sleepScoreMap[lastNightDay]!=null){
+    const contribResults=await Promise.all(sleepScoreContribMetrics.map(m=>fetchJSON(`/api/v1/time-series?metric=${m}`)));
+    sleepScoreContribMetrics.forEach((m,i)=>{
+      const samples=contribResults[i].samples||[];
+      const daySample=samples.find(s=>s.timestamp.slice(0,10)===lastNightDay);
+      if(daySample) sleepContribs[m]=daySample.value;
+    });
+  }
 
   let html='';
 
-  // ---- LAST NIGHT'S SLEEP ----
+  // ---- LAST NIGHT\\\'S SLEEP ----
   html+='<section id="last-night">';
   if(lastReal){
     const isToday=lastNightDay===today;
-    html+=`<div class="section-title">Last Night's Sleep <span class="date">${fmtDate(lastNightDay)}${isToday?'':' (not current)'}</span></div>`;
-    const m=lastReal.metrics;
-    const sleepScore=byDate[lastNightDay]?.sleep_score;
+    html+=`<div class="section-title">Last Night\\\'s Sleep <span class="date">${fmtDate(lastNightDay)}${isToday?'':' (not current)'}</span></div>`;
+    const sleepScore=sv(lastReal.sleep_score)||sleepScoreMap[lastNightDay];
 
     html+='<div class="grid">';
 
     // Sleep stats card
     html+='<div class="card"><h3>Sleep Summary</h3>';
     if(sleepScore!=null){
-      html+=`<div class="score-row"><div class="score-ring" style="border:3px solid ${scoreColor(sleepScore)}">${Math.round(sleepScore)}</div><div><div style="font-weight:600">Sleep Score</div><div class="score-label">Total: ${toHM(m.total_sleep_duration||0)}</div></div></div>`;
+      html+=`<div class="score-row"><div class="score-ring" style="border:3px solid ${scoreColor(sleepScore)}">${Math.round(sleepScore)}</div><div><div style="font-weight:600">Sleep Score</div><div class="score-label">Total: ${toHM(durMin(lastReal.total_duration)*60)}</div></div></div>`;
     }
     html+='<div class="metrics">';
     const stats=[
-      ['Total Sleep',toHM(m.total_sleep_duration||0)],
-      ['Deep',toHM(m.deep_sleep_duration||0)],
-      ['REM',toHM(m.rem_sleep_duration||0)],
-      ['Light',toHM(m.light_sleep_duration||0)],
-      ['Awake',toHM(m.awake_time||0)],
-      ['Time in Bed',toHM(m.time_in_bed||0)],
-      ['Avg HR',m.average_heart_rate!=null?Math.round(m.average_heart_rate)+' bpm':'--'],
-      ['Lowest HR',m.lowest_heart_rate!=null?Math.round(m.lowest_heart_rate)+' bpm':'--'],
-      ['Avg HRV',m.average_hrv!=null?Math.round(m.average_hrv)+' ms':'--'],
-      ['Avg Breath',m.average_breath!=null?m.average_breath.toFixed(1)+'/min':'--'],
-      ['Efficiency',m.efficiency!=null?Math.round(m.efficiency)+'%':'--'],
-      ['Latency',m.latency!=null?toHM(m.latency):'--'],
+      ['Total Sleep',toHM(durMin(lastReal.total_duration)*60)],
+      ['Deep',toHM(durMin(lastReal.deep_sleep_duration)*60)],
+      ['REM',toHM(durMin(lastReal.rem_sleep_duration)*60)],
+      ['Light',toHM(durMin(lastReal.light_sleep_duration)*60)],
+      ['Awake',toHM(durMin(lastReal.awake_time)*60)],
+      ['Time in Bed',toHM(durMin(lastReal.time_in_bed)*60)],
+      ['Avg HR',sv(lastReal.average_heart_rate)!=null?Math.round(sv(lastReal.average_heart_rate))+' bpm':'--'],
+      ['Lowest HR',sv(lastReal.lowest_heart_rate)!=null?Math.round(sv(lastReal.lowest_heart_rate))+' bpm':'--'],
+      ['Avg HRV',sv(lastReal.average_hrv)!=null?Math.round(sv(lastReal.average_hrv))+' ms':'--'],
+      ['Avg Breath',sv(lastReal.average_breath)!=null?sv(lastReal.average_breath).toFixed(1)+'/min':'--'],
+      ['Efficiency',sv(lastReal.efficiency)!=null?Math.round(sv(lastReal.efficiency))+'%':'--'],
+      ['Latency',lastReal.latency?toHM(durMin(lastReal.latency)*60):'--'],
     ];
     stats.forEach(([l,v])=>html+=`<div class="metric"><div class="val">${v}</div><div class="lbl">${l}</div></div>`);
     html+='</div>';
 
     // Sleep score contributors
-    const sc=byDate[lastNightDay]||{};
     const contribs=[['Deep Sleep','sleep_score_deep_sleep'],['REM Sleep','sleep_score_rem_sleep'],
       ['Total Sleep','sleep_score_total_sleep'],['Efficiency','sleep_score_efficiency'],
       ['Restfulness','sleep_score_restfulness'],['Latency','sleep_score_latency'],['Timing','sleep_score_timing']];
-    const hasContribs=contribs.some(([,k])=>sc[k]!=null);
+    const hasContribs=contribs.some(([,k])=>sleepContribs[k]!=null);
     if(hasContribs){
       html+='<h3 style="margin-top:1rem">Score Breakdown</h3>';
-      contribs.forEach(([label,key])=>html+=contribBar(label,sc[key],C.purple));
+      contribs.forEach(([label,key])=>html+=contribBar(label,sleepContribs[key],C.purple));
     }
     html+='</div>';
 
@@ -576,27 +437,25 @@ async function loadDashboard(){
 
   // ---- TODAY ----
   html+='<section id="today">';
-  if(todayMetrics){
+  const todayReadiness=readinessMap[today];
+  if(todayReadiness!=null){
     html+=`<div class="section-title">Today <span class="date">${fmtDate(today)}</span></div>`;
     html+='<div class="grid">';
 
     // Readiness card
     html+='<div class="card"><h3>Readiness</h3>';
-    const rs=todayMetrics.readiness_score;
-    if(rs!=null){
-      html+=`<div class="score-row"><div class="score-ring" style="border:3px solid ${scoreColor(rs)}">${Math.round(rs)}</div><div style="font-weight:600">Readiness Score</div></div>`;
-    }
+    html+=`<div class="score-row"><div class="score-ring" style="border:3px solid ${scoreColor(todayReadiness)}">${Math.round(todayReadiness)}</div><div style="font-weight:600">Readiness Score</div></div>`;
     const rContribs=[['Resting HR','readiness_resting_heart_rate'],['HRV Balance','readiness_hrv_balance'],
       ['Body Temperature','readiness_body_temperature'],['Recovery Index','readiness_recovery_index'],
       ['Previous Night','readiness_previous_night'],['Sleep Balance','readiness_sleep_balance'],
       ['Activity Balance','readiness_activity_balance'],['Sleep Regularity','readiness_sleep_regularity']];
-    rContribs.forEach(([label,key])=>html+=contribBar(label,todayMetrics[key],C.emerald));
+    rContribs.forEach(([label,key])=>html+=contribBar(label,todayContribs[key],C.emerald));
     html+='</div>';
 
     // Body signals card
     html+='<div class="card"><h3>Body Signals</h3><div class="metrics">';
-    const tempDev=todayMetrics.temperature_deviation;
-    const tempTrend=todayMetrics.temperature_trend_deviation;
+    const tempDev=tempDevMap[today];
+    const tempTrend=tempTrendMap[today];
     if(tempDev!=null) html+=`<div class="metric"><div class="val">${tempDev>0?'+':''}${tempDev.toFixed(2)}&deg;</div><div class="lbl">Temp Deviation</div></div>`;
     if(tempTrend!=null) html+=`<div class="metric"><div class="val">${tempTrend>0?'+':''}${tempTrend.toFixed(2)}&deg;</div><div class="lbl">Temp Trend</div></div>`;
     html+='</div></div>';
@@ -621,62 +480,58 @@ async function loadDashboard(){
 
   // ---- RENDER CHARTS ----
 
-  // Last night charts
+  // Last night charts (data is embedded in the sleep session response)
   if(lastReal){
-    const [hrData,hrvData,stageData]=await Promise.all([
-      fetchJSON(`/api/v1/samples?metric=heart_rate&session_id=${lastReal.id}&limit=500`),
-      fetchJSON(`/api/v1/samples?metric=hrv&session_id=${lastReal.id}&limit=500`),
-      fetchJSON(`/api/v1/samples?metric=sleep_stage&session_id=${lastReal.id}&limit=500`),
-    ]);
-    const timeFmt=d=>new Date(d.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'});
+    const timeFmt=d=>new Date(d.timestamp).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'});
 
-    if(stageData.data.length>0){
-      const sLabels={1:'Deep',2:'Light',3:'REM',4:'Awake'};
-      const sColors={1:C.indigo,2:C.slate,3:C.cyan,4:C.amber};
+    const stageData=lastReal.stages;
+    if(stageData && stageData.samples && stageData.samples.length>0){
+      const sLabels={deep:'Deep',light:'Light',rem:'REM',awake:'Awake'};
+      const sColors={deep:C.indigo,light:C.slate,rem:C.cyan,awake:C.amber};
+      const sNums={deep:1,light:2,rem:3,awake:4};
       new Chart(document.getElementById('lastStages'),{type:'bar',
-        data:{labels:stageData.data.map(timeFmt),datasets:[{data:stageData.data.map(d=>d.value),backgroundColor:stageData.data.map(d=>sColors[d.value]||'#64748b'),barPercentage:1,categoryPercentage:1}]},
-        options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false},tooltip:{callbacks:{label:c=>sLabels[c.raw]||c.raw}}},scales:{...chartOpts.scales,y:{...chartOpts.scales.y,min:0.5,max:4.5,ticks:{...chartOpts.scales.y.ticks,callback:v=>sLabels[v]||''}}}}});
+        data:{labels:stageData.samples.map(timeFmt),datasets:[{data:stageData.samples.map(d=>sNums[d.value]||0),backgroundColor:stageData.samples.map(d=>sColors[d.value]||'#64748b'),barPercentage:1,categoryPercentage:1}]},
+        options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false},tooltip:{callbacks:{label:c=>{const rev={1:'Deep',2:'Light',3:'REM',4:'Awake'};return rev[c.raw]||c.raw;}}}},scales:{...chartOpts.scales,y:{...chartOpts.scales.y,min:0.5,max:4.5,ticks:{...chartOpts.scales.y.ticks,callback:v=>{const m={1:'Deep',2:'Light',3:'REM',4:'Awake'};return m[v]||'';}}}}}});
     }
-    if(hrData.data.length>0){
+
+    const hrData=lastReal.heart_rate;
+    if(hrData && hrData.samples && hrData.samples.length>0){
       new Chart(document.getElementById('lastHr'),{type:'line',
-        data:{labels:hrData.data.map(timeFmt),datasets:[{label:'bpm',data:hrData.data.map(d=>d.value),borderColor:C.rose,tension:0.3,pointRadius:0,borderWidth:1.5}]},
+        data:{labels:hrData.samples.map(timeFmt),datasets:[{label:'bpm',data:hrData.samples.map(d=>d.value),borderColor:C.rose,tension:0.3,pointRadius:0,borderWidth:1.5}]},
         options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false}}}});
     }
-    if(hrvData.data.length>0){
+
+    const hrvData=lastReal.hrv;
+    if(hrvData && hrvData.samples && hrvData.samples.length>0){
       new Chart(document.getElementById('lastHrv'),{type:'line',
-        data:{labels:hrvData.data.map(timeFmt),datasets:[{label:'ms',data:hrvData.data.map(d=>d.value),borderColor:C.cyan,tension:0.3,pointRadius:0,borderWidth:1.5,fill:true,backgroundColor:'rgba(6,182,212,0.08)'}]},
+        data:{labels:hrvData.samples.map(timeFmt),datasets:[{label:'ms',data:hrvData.samples.map(d=>d.value),borderColor:C.cyan,tension:0.3,pointRadius:0,borderWidth:1.5,fill:true,backgroundColor:'rgba(6,182,212,0.08)'}]},
         options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false}}}});
     }
   }
 
   // History charts
   if(sess.length>0){
-    const labels=sess.map(s=>s.start_ts.slice(5,10));
+    const labels=sess.map(s=>s.start.slice(5,10));
     new Chart(document.getElementById('sleepDuration'),{type:'bar',
       data:{labels,datasets:[
-        {label:'Deep',data:sess.map(s=>+(toH(s.metrics.deep_sleep_duration||0))),backgroundColor:C.indigo},
-        {label:'REM',data:sess.map(s=>+(toH(s.metrics.rem_sleep_duration||0))),backgroundColor:C.cyan},
-        {label:'Light',data:sess.map(s=>+(toH(s.metrics.light_sleep_duration||0))),backgroundColor:C.slate},
+        {label:'Deep',data:sess.map(s=>+(durMin(s.deep_sleep_duration)/60).toFixed(1)),backgroundColor:C.indigo},
+        {label:'REM',data:sess.map(s=>+(durMin(s.rem_sleep_duration)/60).toFixed(1)),backgroundColor:C.cyan},
+        {label:'Light',data:sess.map(s=>+(durMin(s.light_sleep_duration)/60).toFixed(1)),backgroundColor:C.slate},
       ]},options:{...chartOpts,scales:{...chartOpts.scales,x:{...chartOpts.scales.x,stacked:true},y:{...chartOpts.scales.y,stacked:true}}}});
 
     new Chart(document.getElementById('hrChart'),{type:'line',
       data:{labels,datasets:[
-        {label:'Avg',data:sess.map(s=>s.metrics.average_heart_rate??null),borderColor:C.rose,tension:0.3,pointRadius:2,spanGaps:true},
-        {label:'Low',data:sess.map(s=>s.metrics.lowest_heart_rate??null),borderColor:C.amber,tension:0.3,pointRadius:2,spanGaps:true},
+        {label:'Avg',data:sess.map(s=>sv(s.average_heart_rate)),borderColor:C.rose,tension:0.3,pointRadius:2,spanGaps:true},
+        {label:'Low',data:sess.map(s=>sv(s.lowest_heart_rate)),borderColor:C.amber,tension:0.3,pointRadius:2,spanGaps:true},
       ]},options:chartOpts});
 
     new Chart(document.getElementById('hrvChart'),{type:'line',
       data:{labels,datasets:[
-        {label:'Avg HRV',data:sess.map(s=>s.metrics.average_hrv??null),borderColor:C.cyan,tension:0.3,pointRadius:2,spanGaps:true,fill:true,backgroundColor:'rgba(6,182,212,0.08)'},
+        {label:'Avg HRV',data:sess.map(s=>sv(s.average_hrv)),borderColor:C.cyan,tension:0.3,pointRadius:2,spanGaps:true,fill:true,backgroundColor:'rgba(6,182,212,0.08)'},
       ]},options:chartOpts});
   }
 
   // Scores chart
-  const readinessMap={},sleepScoreMap={};
-  dailyData.forEach(d=>{
-    if(d.metric==='readiness_score')readinessMap[d.date]=d.value;
-    if(d.metric==='sleep_score')sleepScoreMap[d.date]=d.value;
-  });
   const allDates=[...new Set([...Object.keys(readinessMap),...Object.keys(sleepScoreMap)])].sort();
   if(allDates.length>0){
     new Chart(document.getElementById('scores'),{type:'line',
@@ -701,7 +556,7 @@ app = Litestar(
     route_handlers=[
         health_check, index, setup_page, start_oauth,
         oauth_callback, trigger_sync, reset_data,
-        list_metrics, query_samples, query_sleep_sessions, query_daily,
+        *service_routes,
     ],
     on_startup=[on_startup],
 )

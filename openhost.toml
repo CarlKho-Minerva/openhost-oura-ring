@@ -18,6 +18,6 @@ cpu_millicores = 200
 sqlite = ["health"]
 
 [[services.v2.provides]]
-service = "github.com/zack/services/health-data"
+service = "github.com/imbue-openhost/services/health-data"
 version = "0.1.0"
 endpoint = "/api/"
