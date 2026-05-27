@@ -179,7 +179,7 @@ SETUP_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Health Data - Setup</title>
+<title>Oura - Setup</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -208,7 +208,7 @@ SETUP_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
-  <h1>Health Data</h1>
+  <h1>Oura</h1>
   <p class="status">Status: {{status}} &middot; Last sync: {{last_sync}}</p>
 
   <h2>Connect to Oura</h2>
@@ -229,7 +229,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Health Data</title>
+<title>Oura</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -266,7 +266,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div class="header">
-  <h1>Health Data</h1>
+  <h1>Oura</h1>
   <div class="actions">
     <button class="btn btn-primary" onclick="doSync()">Sync Now</button>
     <a class="btn btn-secondary" href="/setup">Settings</a>
