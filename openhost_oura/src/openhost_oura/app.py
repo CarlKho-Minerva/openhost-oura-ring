@@ -76,19 +76,6 @@ async def start_oauth(request: Request) -> Response:
     return Redirect(url)
 
 
-@post("/setup/pat")
-async def save_pat(request: Request) -> Response:
-    body = await request.body()
-    params = dict(p.split("=", 1) for p in body.decode().split("&") if "=" in p)
-    pat = _url_decode(params.get("pat", "")).strip()
-    if not pat:
-        return Response(content="Personal access token required", status_code=400)
-
-    await db.set_config("oura_access_token", pat)
-    asyncio.create_task(_background_sync())
-    return Redirect("/")
-
-
 @get("/oauth/callback")
 async def oauth_callback(request: Request) -> Response:
     code = request.query_params.get("code")
@@ -394,16 +381,7 @@ SETUP_HTML = """<!DOCTYPE html>
   <h1>Health Data</h1>
   <p class="status">Status: {{status}} &middot; Last sync: {{last_sync}}</p>
 
-  <h2>Option 1: Personal Access Token</h2>
-  <form method="POST" action="/setup/pat">
-    <label>Oura Personal Access Token</label>
-    <input type="password" name="pat" placeholder="Paste your token here">
-    <button type="submit" class="alt-btn">Save &amp; Sync</button>
-  </form>
-
-  <hr class="divider">
-
-  <h2>Option 2: OAuth2</h2>
+  <h2>Connect to Oura</h2>
   <form method="POST" action="/setup/oauth">
     <label>Client ID</label>
     <input type="text" name="client_id" value="{{client_id}}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
@@ -721,7 +699,7 @@ loadDashboard();
 
 app = Litestar(
     route_handlers=[
-        health_check, index, setup_page, start_oauth, save_pat,
+        health_check, index, setup_page, start_oauth,
         oauth_callback, trigger_sync, reset_data,
         list_metrics, query_samples, query_sleep_sessions, query_daily,
     ],
