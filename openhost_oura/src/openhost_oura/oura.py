@@ -132,14 +132,11 @@ async def _sync_sleep(client, headers, start_date, end_date):
         for rec in records:
             source_id = rec.get("id")
             if not source_id:
-                log.warning("Skipping sleep record with no id: day=%s type=%s", rec.get("day"), rec.get("type"))
                 continue
 
             raw_start = rec.get("bedtime_start")
             raw_end = rec.get("bedtime_end")
-            log.debug("Sleep record: id=%s day=%s type=%s start=%s end=%s", source_id, rec.get("day"), rec.get("type"), raw_start, raw_end)
             if not raw_start or not raw_end:
-                log.warning("Skipping sleep record %s (day=%s type=%s): missing bedtime_start=%s or bedtime_end=%s", source_id, rec.get("day"), rec.get("type"), raw_start, raw_end)
                 continue
             bedtime_start = _to_utc(raw_start)
             bedtime_end = _to_utc(raw_end)
