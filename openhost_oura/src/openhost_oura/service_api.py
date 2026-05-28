@@ -1,24 +1,46 @@
 """Health-data service provider API.
 
-Implements the health-data service spec endpoints. Response JSON matches
-the attrs types in health_data_service.data_types / specific_types so
-that consumers can deserialize via cattrs.
+Implements the health-data service spec endpoints using the typed
+models from health_data_service.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+import attrs
+from health_data_service import (
+    IntervalSample,
+    MetricKind,
+    MetricType,
+    Sample,
+    SleepSession,
+    TimeSeries,
+)
+from health_data_service.specific_types import (
+    BreathRateAvg,
+    Count,
+    Duration,
+    Efficiency,
+    HeartRate,
+    HeartRateAvg,
+    HeartRateMin,
+    HRV_RMSSD,
+    HRVAvg,
+    Score,
+    SleepStage,
+    SleepStages,
+)
 from litestar import Request, get
 
 from . import db
 
 SOURCE = "oura"
 
-# Maps DB metric names to display metadata for the time-series endpoint
 METRIC_INFO = {
     "heart_rate": ("Heart Rate", "bpm"),
     "hrv": ("Heart Rate Variability (RMSSD)", "ms"),
     "sleep_stage": ("Sleep Stages", None),
-    # Daily metrics served as time series
     "readiness_score": ("Readiness Score", None),
     "readiness_activity_balance": ("Activity Balance", None),
     "readiness_body_temperature": ("Body Temperature", None),
@@ -41,14 +63,11 @@ METRIC_INFO = {
     "sleep_score_total_sleep": ("Total Sleep Score", None),
 }
 
-# Sleep session metric names that represent durations (stored in seconds in DB,
-# converted to minutes for the wire format)
 DURATION_METRICS = {
     "total_sleep_duration", "deep_sleep_duration", "light_sleep_duration",
     "rem_sleep_duration", "awake_time", "time_in_bed", "latency",
 }
 
-# Map DB metric name → SleepSession field name (for scalar metrics)
 SLEEP_SCALAR_FIELDS = {
     "total_sleep_duration": "total_duration",
     "deep_sleep_duration": "deep_sleep_duration",
@@ -65,20 +84,53 @@ SLEEP_SCALAR_FIELDS = {
     "restless_periods": "restless_periods",
 }
 
-
-def _scalar(metric_id: str, display_name: str, unit: str | None, value: float) -> dict:
-    """Build a ScalarMetric-shaped dict."""
-    return {
-        "metric_id": metric_id,
-        "display_name": display_name,
-        "unit": unit,
-        "value": value,
-        "source": SOURCE,
-    }
+STAGE_MAP = {1.0: SleepStage.DEEP, 2.0: SleepStage.LIGHT, 3.0: SleepStage.REM, 4.0: SleepStage.AWAKE}
 
 
-def _duration(field: str, seconds: float) -> dict:
-    return _scalar("duration", field.replace("_", " ").title(), "min", seconds / 60.0)
+def _serialize(obj):
+    """Recursively convert attrs instances to dicts for JSON response."""
+    if attrs.has(type(obj)):
+        d = {}
+        for field in attrs.fields(type(obj)):
+            val = getattr(obj, field.name)
+            d[field.name] = _serialize(val)
+        return d
+    if isinstance(obj, list):
+        return [_serialize(v) for v in obj]
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _serialize(v) for k, v in obj.items()}
+    return obj
+
+
+def _parse_ts(s: str) -> datetime:
+    if not s:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _make_scalar(m_name: str, m_val: float):
+    """Build the appropriate scalar metric type for a sleep session field."""
+    if m_name in DURATION_METRICS:
+        display = m_name.replace("_", " ").title()
+        return Duration(value=m_val / 60.0, source=SOURCE, display_name=display)
+    if m_name == "efficiency":
+        return Efficiency(value=m_val, source=SOURCE)
+    if m_name == "restless_periods":
+        return Count(value=int(m_val), source=SOURCE, display_name="Restless Periods")
+    if m_name == "average_heart_rate":
+        return HeartRateAvg(value=m_val, source=SOURCE)
+    if m_name == "lowest_heart_rate":
+        return HeartRateMin(value=m_val, source=SOURCE)
+    if m_name == "average_hrv":
+        return HRVAvg(value=m_val, source=SOURCE)
+    if m_name == "average_breath":
+        return BreathRateAvg(value=m_val, source=SOURCE)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +139,7 @@ def _duration(field: str, seconds: float) -> dict:
 
 @get("/api/v1/metrics")
 async def service_list_metrics() -> dict:
-    metrics = []
+    metrics: list[MetricType] = []
     async with db.connect() as conn:
         sample_metrics = await (await conn.execute(
             "SELECT DISTINCT metric FROM samples ORDER BY metric"
@@ -95,18 +147,24 @@ async def service_list_metrics() -> dict:
         for r in sample_metrics:
             name = r[0]
             display, unit = METRIC_INFO.get(name, (name, None))
-            metrics.append({"metric_id": name, "display_name": display, "unit": unit})
+            metrics.append(MetricType(
+                metric_id=name, display_name=display,
+                kind=MetricKind.TIME_SERIES, unit=unit,
+            ))
 
         daily = await (await conn.execute(
             "SELECT DISTINCT metric FROM daily_metrics ORDER BY metric"
         )).fetchall()
         for r in daily:
             name = r[0]
-            if not any(m["metric_id"] == name for m in metrics):
+            if not any(m.metric_id == name for m in metrics):
                 display, unit = METRIC_INFO.get(name, (name, None))
-                metrics.append({"metric_id": name, "display_name": display, "unit": unit})
+                metrics.append(MetricType(
+                    metric_id=name, display_name=display,
+                    kind=MetricKind.TIME_SERIES, unit=unit,
+                ))
 
-    return {"metrics": metrics}
+    return {"metrics": [_serialize(m) for m in metrics]}
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +183,17 @@ async def service_time_series(request: Request) -> dict:
 
     display, unit = METRIC_INFO.get(metric, (metric, None))
 
-    # Check if it's a daily metric
     is_daily = metric.startswith("readiness_") or metric.startswith("sleep_score") or metric.startswith("temperature_")
 
     if is_daily:
-        return await _daily_time_series(metric, display, unit, start, end, limit)
+        ts = await _daily_time_series(metric, display, unit, start, end, limit)
+    else:
+        ts = await _sample_time_series(metric, display, unit, start, end, limit)
 
+    return _serialize(ts)
+
+
+async def _sample_time_series(metric, display, unit, start, end, limit) -> TimeSeries:
     conditions = ["metric = ?"]
     params: list = [metric]
     if start:
@@ -151,23 +214,21 @@ async def service_time_series(request: Request) -> dict:
             params,
         )).fetchall()
 
-    samples = []
+    samples: list[Sample | IntervalSample] = []
     for r in rows:
-        s: dict = {"timestamp": r[0], "value": r[2]}
+        ts = _parse_ts(r[0])
         if r[1]:
-            s["end_timestamp"] = r[1]
-        samples.append(s)
+            samples.append(IntervalSample(timestamp=ts, value=r[2], end_timestamp=_parse_ts(r[1])))
+        else:
+            samples.append(Sample(timestamp=ts, value=r[2]))
 
-    return {
-        "metric_id": metric,
-        "display_name": display,
-        "unit": unit,
-        "source": SOURCE,
-        "samples": samples,
-    }
+    return TimeSeries(
+        metric_id=metric, display_name=display,
+        unit=unit, source=SOURCE, samples=samples,
+    )
 
 
-async def _daily_time_series(metric, display, unit, start, end, limit):
+async def _daily_time_series(metric, display, unit, start, end, limit) -> TimeSeries:
     conditions = ["metric = ?"]
     params: list = [metric]
     if start:
@@ -188,14 +249,11 @@ async def _daily_time_series(metric, display, unit, start, end, limit):
             params,
         )).fetchall()
 
-    samples = [{"timestamp": f"{r[0]}T00:00:00+00:00", "value": r[1]} for r in rows]
-    return {
-        "metric_id": metric,
-        "display_name": display,
-        "unit": unit,
-        "source": SOURCE,
-        "samples": samples,
-    }
+    samples = [Sample(timestamp=_parse_ts(f"{r[0]}T00:00:00+00:00"), value=r[1]) for r in rows]
+    return TimeSeries(
+        metric_id=metric, display_name=display,
+        unit=unit, source=SOURCE, samples=samples,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -230,14 +288,13 @@ async def service_sleep_sessions(request: Request) -> dict:
         result = []
         for s in sessions:
             session_id = s[0]
-            session: dict = {
-                "start": s[3],
-                "end": s[4],
+            kwargs: dict = {
+                "start": _parse_ts(s[3]),
+                "end": _parse_ts(s[4]),
                 "source": s[1],
                 "id": str(session_id),
             }
 
-            # Scalar metrics
             metrics = await (await conn.execute(
                 "SELECT metric, value FROM sleep_session_metrics WHERE sleep_session_id = ?",
                 (session_id,),
@@ -247,20 +304,9 @@ async def service_sleep_sessions(request: Request) -> dict:
                 field = SLEEP_SCALAR_FIELDS.get(m_name)
                 if not field:
                     continue
-                if m_name in DURATION_METRICS:
-                    session[field] = _duration(m_name, m_val)
-                elif m_name == "efficiency":
-                    session[field] = _scalar("efficiency", "Efficiency", "%", m_val)
-                elif m_name == "restless_periods":
-                    session[field] = _scalar("count", "Restless Periods", None, m_val)
-                elif m_name == "average_heart_rate":
-                    session[field] = _scalar("average_heart_rate", "Avg Heart Rate", "bpm", m_val)
-                elif m_name == "lowest_heart_rate":
-                    session[field] = _scalar("lowest_heart_rate", "Lowest Heart Rate", "bpm", m_val)
-                elif m_name == "average_hrv":
-                    session[field] = _scalar("average_hrv", "Avg HRV", "ms", m_val)
-                elif m_name == "average_breath":
-                    session[field] = _scalar("average_breath", "Avg Breath Rate", "breaths/min", m_val)
+                scalar = _make_scalar(m_name, m_val)
+                if scalar is not None:
+                    kwargs[field] = scalar
 
             # Sleep stages
             stage_rows = await (await conn.execute(
@@ -271,21 +317,17 @@ async def service_sleep_sessions(request: Request) -> dict:
             )).fetchall()
 
             if stage_rows:
-                stage_map = {1.0: "deep", 2.0: "light", 3.0: "rem", 4.0: "awake"}
-                session["stages"] = {
-                    "metric_id": "sleep_stages",
-                    "display_name": "Sleep Stages",
-                    "unit": None,
-                    "source": SOURCE,
-                    "samples": [
-                        {
-                            "timestamp": r[0],
-                            "end_timestamp": r[1],
-                            "value": stage_map.get(r[2], "unknown"),
-                        }
+                kwargs["stages"] = SleepStages(
+                    source=SOURCE,
+                    samples=[
+                        IntervalSample(
+                            timestamp=_parse_ts(r[0]),
+                            value=STAGE_MAP.get(r[2], SleepStage.UNKNOWN),
+                            end_timestamp=_parse_ts(r[1]),
+                        )
                         for r in stage_rows
                     ],
-                }
+                )
 
             # HR time series
             hr_rows = await (await conn.execute(
@@ -296,19 +338,13 @@ async def service_sleep_sessions(request: Request) -> dict:
             )).fetchall()
 
             if hr_rows:
-                hr_samples = []
+                hr_samples: list = []
                 for r in hr_rows:
-                    s_dict: dict = {"timestamp": r[0], "value": r[2]}
                     if r[1]:
-                        s_dict["end_timestamp"] = r[1]
-                    hr_samples.append(s_dict)
-                session["heart_rate"] = {
-                    "metric_id": "heart_rate",
-                    "display_name": "Heart Rate",
-                    "unit": "bpm",
-                    "source": SOURCE,
-                    "samples": hr_samples,
-                }
+                        hr_samples.append(IntervalSample(timestamp=_parse_ts(r[0]), value=r[2], end_timestamp=_parse_ts(r[1])))
+                    else:
+                        hr_samples.append(Sample(timestamp=_parse_ts(r[0]), value=r[2]))
+                kwargs["heart_rate"] = HeartRate(source=SOURCE, samples=hr_samples)
 
             # HRV time series
             hrv_rows = await (await conn.execute(
@@ -319,19 +355,13 @@ async def service_sleep_sessions(request: Request) -> dict:
             )).fetchall()
 
             if hrv_rows:
-                hrv_samples = []
+                hrv_samples: list = []
                 for r in hrv_rows:
-                    s_dict = {"timestamp": r[0], "value": r[2]}
                     if r[1]:
-                        s_dict["end_timestamp"] = r[1]
-                    hrv_samples.append(s_dict)
-                session["hrv"] = {
-                    "metric_id": "hrv_rmssd",
-                    "display_name": "Heart Rate Variability (RMSSD)",
-                    "unit": None,
-                    "source": SOURCE,
-                    "samples": hrv_samples,
-                }
+                        hrv_samples.append(IntervalSample(timestamp=_parse_ts(r[0]), value=r[2], end_timestamp=_parse_ts(r[1])))
+                    else:
+                        hrv_samples.append(Sample(timestamp=_parse_ts(r[0]), value=r[2]))
+                kwargs["hrv"] = HRV_RMSSD(source=SOURCE, samples=hrv_samples)
 
             # Sleep score from daily_metrics
             date_str = s[3][:10]
@@ -340,11 +370,11 @@ async def service_sleep_sessions(request: Request) -> dict:
                 (date_str,),
             )).fetchone()
             if score_row:
-                session["sleep_score"] = _scalar("score", "Sleep Score", None, score_row[0])
+                kwargs["sleep_score"] = Score(value=score_row[0], source=SOURCE, display_name="Sleep Score")
 
-            result.append(session)
+            result.append(SleepSession(**kwargs))
 
-    return {"data": result}
+    return {"data": [_serialize(s) for s in result]}
 
 
 # ---------------------------------------------------------------------------

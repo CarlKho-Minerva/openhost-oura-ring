@@ -16,7 +16,7 @@ def test_index_redirects_to_setup(stack):
 def test_setup_page(stack):
     r = httpx.get(f"{stack.url}/setup")
     assert r.status_code == 200
-    assert "Health Data" in r.text
+    assert "Oura" in r.text
 
 
 def test_api_metrics_empty(stack):
