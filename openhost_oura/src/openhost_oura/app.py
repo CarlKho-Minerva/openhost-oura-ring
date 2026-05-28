@@ -382,9 +382,9 @@ async function loadDashboard(){
 
   // ---- LAST NIGHT\\\'S SLEEP ----
   html+='<section id="last-night">';
-  if(lastReal){
-    const isToday=lastNightDay===today;
-    html+=`<div class="section-title">Last Night\\\'s Sleep <span class="date">${fmtDate(lastNightDay)}${isToday?'':' (not current)'}</span></div>`;
+  const isToday=lastReal && lastNightDay===today;
+  if(lastReal && isToday){
+    html+=`<div class="section-title">Last Night\\\'s Sleep <span class="date">${fmtDate(lastNightDay)}</span></div>`;
     const sleepScore=sv(lastReal.sleep_score)||sleepScoreMap[lastNightDay];
 
     html+='<div class="grid">';
@@ -431,7 +431,7 @@ async function loadDashboard(){
 
     html+='</div>';
   } else {
-    html+='<div class="section-title">Last Night\\\'s Sleep</div><div class="no-data">No sleep data available</div>';
+    html+='<div class="section-title">Last Night\\\'s Sleep</div><div class="no-data">No data for last night yet. Try syncing your Oura ring in the Oura app, then sync here.</div>';
   }
   html+='</section>';
 
@@ -480,8 +480,8 @@ async function loadDashboard(){
 
   // ---- RENDER CHARTS ----
 
-  // Last night charts (data is embedded in the sleep session response)
-  if(lastReal){
+  // Last night charts (only rendered when today's sleep data exists)
+  if(isToday){
     const timeFmt=d=>new Date(d.timestamp).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'});
 
     const stageData=lastReal.stages;
