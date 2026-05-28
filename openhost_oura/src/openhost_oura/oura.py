@@ -104,7 +104,8 @@ async def sync_all(days: int = 30):
     if not token:
         raise RuntimeError("No Oura access token configured")
 
-    end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Oura API end_date is exclusive, so add one day to include today's data
+    end_date = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
     start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
     headers = {"Authorization": f"Bearer {token}"}
 
