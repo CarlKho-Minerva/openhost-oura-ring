@@ -151,10 +151,10 @@ async def _periodic_sync():
         token = await db.get_config("oura_access_token")
         if token:
             try:
-                await oura.sync_all(days=7)
+                await oura.sync_all()
             except Exception:
                 log.exception("Periodic sync failed")
-        await asyncio.sleep(6 * 3600)
+        await asyncio.sleep(600)
 
 
 async def on_startup() -> None:

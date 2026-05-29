@@ -99,14 +99,23 @@ async def _fetch_paginated(
     return all_data
 
 
-async def sync_all(days: int = 30):
+async def sync_all(days: int | None = None):
     token = await get_access_token()
     if not token:
         raise RuntimeError("No Oura access token configured")
 
-    # Oura API end_date is exclusive, so add one day to include today's data
     end_date = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
-    start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    if days is not None:
+        start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    else:
+        last_sync = await db.get_config("last_sync")
+        if last_sync:
+            last_dt = datetime.fromisoformat(last_sync)
+            start_date = (last_dt - timedelta(hours=1)).strftime("%Y-%m-%d")
+        else:
+            start_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+
     headers = {"Authorization": f"Bearer {token}"}
 
     async with httpx.AsyncClient(timeout=60) as client:
