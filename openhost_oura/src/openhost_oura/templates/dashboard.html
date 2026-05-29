@@ -65,11 +65,12 @@ function toHM(s){const h=Math.floor(s/3600),m=Math.round((s%3600)/60);return h>0
 function scoreColor(v){return v>=85?C.emerald:v>=70?C.amber:C.rose;}
 
 function getToday(){
-  // Day boundary at 3am Pacific (UTC-7 or UTC-8 DST)
   const now=new Date();
-  const pac=new Date(now.toLocaleString('en-US',{timeZone:'America/Los_Angeles'}));
-  if(pac.getHours()<3) pac.setDate(pac.getDate()-1);
-  return pac.toISOString().slice(0,10);
+  const parts=now.toLocaleDateString('en-CA',{timeZone:'America/Los_Angeles'}).split('-');
+  const h=parseInt(now.toLocaleTimeString('en-US',{timeZone:'America/Los_Angeles',hour12:false,hour:'numeric'}));
+  let y=parseInt(parts[0]),m=parseInt(parts[1]),d=parseInt(parts[2]);
+  if(h<3){d--;if(d<1){m--;if(m<1){m=12;y--;}d=new Date(y,m,0).getDate();}}
+  return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 }
 const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 function fmtDate(iso){
@@ -118,9 +119,11 @@ async function loadDashboard(){
   let lastNightDay=null;
   if(lastReal){
     const end=new Date(lastReal.end);
-    const endPac=new Date(end.toLocaleString('en-US',{timeZone:'America/Los_Angeles'}));
-    if(endPac.getHours()<3) endPac.setDate(endPac.getDate()-1);
-    lastNightDay=endPac.toISOString().slice(0,10);
+    const ep=end.toLocaleDateString('en-CA',{timeZone:'America/Los_Angeles'}).split('-');
+    const eh=parseInt(end.toLocaleTimeString('en-US',{timeZone:'America/Los_Angeles',hour12:false,hour:'numeric'}));
+    let ey=parseInt(ep[0]),em=parseInt(ep[1]),ed=parseInt(ep[2]);
+    if(eh<3){ed--;if(ed<1){em--;if(em<1){em=12;ey--;}ed=new Date(ey,em,0).getDate();}}
+    lastNightDay=ey+'-'+String(em).padStart(2,'0')+'-'+String(ed).padStart(2,'0');
   }
 
   // Build daily lookups from time-series responses
