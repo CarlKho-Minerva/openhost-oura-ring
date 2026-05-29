@@ -42,6 +42,7 @@
 <div class="header">
   <h1>Oura</h1>
   <div class="actions">
+    <span id="last-sync" style="font-size:0.75rem;color:#64748b;align-self:center"></span>
     <button class="btn btn-primary" onclick="doSync()">Sync Now</button>
     <a class="btn btn-secondary" href="/setup">Settings</a>
   </div>
@@ -78,11 +79,32 @@ function fmtDate(iso){
   return DAYS[d.getDay()]+', '+d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
 }
 
+function showLastSync(ts){
+  const el=document.getElementById('last-sync');
+  if(!ts){el.textContent='';return;}
+  const d=new Date(ts);
+  const now=new Date();
+  const diffMin=Math.round((now-d)/60000);
+  let ago;
+  if(diffMin<1) ago='just now';
+  else if(diffMin<60) ago=diffMin+'m ago';
+  else if(diffMin<1440) ago=Math.floor(diffMin/60)+'h ago';
+  else ago=Math.floor(diffMin/1440)+'d ago';
+  el.textContent='Synced '+ago;
+}
+
 async function doSync(){
   const b=document.querySelector('.btn-primary');b.textContent='Syncing...';b.disabled=true;
-  try{await fetch('/sync',{method:'POST'});location.reload();}
-  catch(e){b.textContent='Sync Failed';setTimeout(()=>{b.textContent='Sync Now';b.disabled=false;},2000);}
+  try{
+    const r=await fetch('/sync',{method:'POST'});
+    const data=await r.json();
+    if(data.last_sync) showLastSync(data.last_sync);
+    b.textContent='Sync Now';b.disabled=false;
+    location.reload();
+  }catch(e){b.textContent='Sync Failed';setTimeout(()=>{b.textContent='Sync Now';b.disabled=false;},2000);}
 }
+
+fetch('/api/status').then(r=>r.json()).then(d=>{if(d.last_sync)showLastSync(d.last_sync);}).catch(()=>{});
 
 function contribBar(label,val,color){
   if(val==null)return'';

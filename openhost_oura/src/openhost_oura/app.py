@@ -107,6 +107,12 @@ async def oauth_callback(request: Request) -> Response:
     return Redirect("/")
 
 
+@get("/api/status")
+async def get_status() -> dict:
+    last_sync = await db.get_config("last_sync")
+    return {"last_sync": last_sync}
+
+
 @post("/sync")
 async def trigger_sync() -> dict:
     token = await db.get_config("oura_access_token")
@@ -114,7 +120,8 @@ async def trigger_sync() -> dict:
         return {"error": "Not configured"}
     try:
         await oura.sync_all(days=30)
-        return {"status": "ok"}
+        last_sync = await db.get_config("last_sync")
+        return {"status": "ok", "last_sync": last_sync}
     except Exception as e:
         log.exception("Sync failed")
         return {"status": "error", "detail": str(e)}
@@ -187,7 +194,7 @@ DASHBOARD_HTML = (_TEMPLATES / "dashboard.html").read_text()
 app = Litestar(
     route_handlers=[
         health_check, index, setup_page, start_oauth,
-        oauth_callback, trigger_sync, reset_data,
+        oauth_callback, get_status, trigger_sync, reset_data,
         *service_routes,
     ],
     on_startup=[on_startup],
