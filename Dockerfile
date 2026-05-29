@@ -6,6 +6,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
+RUN mkdir -p openhost_oura/src/openhost_oura && touch openhost_oura/src/openhost_oura/__init__.py
+RUN uv sync --no-dev
+
 COPY openhost_oura/ openhost_oura/
 RUN uv sync --no-dev
 
