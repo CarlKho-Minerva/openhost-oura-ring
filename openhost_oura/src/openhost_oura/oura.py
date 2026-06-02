@@ -306,11 +306,13 @@ async def _sync_heartrate(client, headers, start_date, end_date):
     async with db.connect() as conn:
         batch = []
         for rec in records:
-            ts_unix = rec.get("timestamp_unix")
+            # Oura's documented timestamp_unix isn't actually populated; derive ms from the ISO timestamp.
+            ts = rec.get("timestamp")
             bpm = rec.get("bpm")
-            if ts_unix is None or bpm is None:
+            if ts is None or bpm is None:
                 continue
-            batch.append(("oura", "heart_rate", int(ts_unix), None, float(bpm), rec.get("source"), None))
+            ts_unix = int(datetime.fromisoformat(ts).timestamp() * 1000)
+            batch.append(("oura", "heart_rate", ts_unix, None, float(bpm), rec.get("source"), None))
 
         if batch:
             await conn.executemany(
