@@ -211,8 +211,8 @@ async def _sync_sleep(client, headers, start_date, end_date):
                 )
                 if samples_buf:
                     await conn.executemany(
-                        """INSERT INTO samples (source, metric, start_ts, end_ts, value, sleep_session_id)
-                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        """INSERT OR IGNORE INTO samples (source, metric, timestamp_unix, end_unix, value, hr_source, sleep_session_id)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
                         samples_buf,
                     )
 
@@ -223,8 +223,8 @@ async def _sync_sleep(client, headers, start_date, end_date):
                 )
                 if samples_buf:
                     await conn.executemany(
-                        """INSERT INTO samples (source, metric, start_ts, end_ts, value, sleep_session_id)
-                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        """INSERT OR IGNORE INTO samples (source, metric, timestamp_unix, end_unix, value, hr_source, sleep_session_id)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
                         samples_buf,
                     )
 
@@ -235,8 +235,8 @@ async def _sync_sleep(client, headers, start_date, end_date):
                 )
                 if samples_buf:
                     await conn.executemany(
-                        """INSERT INTO samples (source, metric, start_ts, end_ts, value, sleep_session_id)
-                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        """INSERT OR IGNORE INTO samples (source, metric, timestamp_unix, end_unix, value, hr_source, sleep_session_id)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
                         samples_buf,
                     )
 
@@ -261,9 +261,10 @@ def _insert_interval_samples(
         buf.append((
             "oura",
             metric,
-            t.isoformat(),
-            t_end.isoformat(),
+            int(t.timestamp() * 1000),
+            int(t_end.timestamp() * 1000),
             float(val),
+            None,
             session_id,
         ))
 
@@ -285,9 +286,10 @@ def _insert_sleep_stages(
         buf.append((
             "oura",
             "sleep_stage",
-            t.isoformat(),
-            t_end.isoformat(),
+            int(t.timestamp() * 1000),
+            int(t_end.timestamp() * 1000),
             val,
+            None,
             session_id,
         ))
 
@@ -304,16 +306,16 @@ async def _sync_heartrate(client, headers, start_date, end_date):
     async with db.connect() as conn:
         batch = []
         for rec in records:
-            ts = rec.get("timestamp")
+            ts_unix = rec.get("timestamp_unix")
             bpm = rec.get("bpm")
-            if ts is None or bpm is None:
+            if ts_unix is None or bpm is None:
                 continue
-            batch.append(("oura", "heart_rate", _to_utc(ts), None, float(bpm), None))
+            batch.append(("oura", "heart_rate", int(ts_unix), None, float(bpm), rec.get("source"), None))
 
         if batch:
             await conn.executemany(
-                """INSERT OR IGNORE INTO samples (source, metric, start_ts, end_ts, value, sleep_session_id)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT OR IGNORE INTO samples (source, metric, timestamp_unix, end_unix, value, hr_source, sleep_session_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 batch,
             )
             await conn.commit()

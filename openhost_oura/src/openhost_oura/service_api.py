@@ -37,6 +37,24 @@ from . import db
 
 SOURCE = "oura"
 
+
+def _dt(ms: int) -> datetime:
+    """Convert a stored unix-millisecond timestamp to a UTC datetime."""
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+
+
+def _to_ms(value: str) -> int:
+    """Parse an ISO-8601 timestamp (or bare date) into unix milliseconds."""
+    s = value.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
+# Maps DB metric names to display metadata for the time-series endpoint
 METRIC_INFO = {
     "heart_rate": ("Heart Rate", "bpm"),
     "hrv": ("Heart Rate Variability (RMSSD)", "ms"),
@@ -197,11 +215,11 @@ async def _sample_time_series(metric, display, unit, start, end, limit) -> TimeS
     conditions = ["metric = ?"]
     params: list = [metric]
     if start:
-        conditions.append("start_ts >= ?")
-        params.append(start)
+        conditions.append("timestamp_unix >= ?")
+        params.append(_to_ms(start))
     if end:
-        conditions.append("start_ts <= ?")
-        params.append(end)
+        conditions.append("timestamp_unix <= ?")
+        params.append(_to_ms(end))
     if limit:
         params.append(int(limit))
 
@@ -210,15 +228,15 @@ async def _sample_time_series(metric, display, unit, start, end, limit) -> TimeS
 
     async with db.connect() as conn:
         rows = await (await conn.execute(
-            f"SELECT start_ts, end_ts, value FROM samples WHERE {where} ORDER BY start_ts{limit_clause}",
+            f"SELECT timestamp_unix, end_unix, value FROM samples WHERE {where} ORDER BY timestamp_unix{limit_clause}",
             params,
         )).fetchall()
 
     samples: list[Sample | IntervalSample] = []
     for r in rows:
-        ts = _parse_ts(r[0])
-        if r[1]:
-            samples.append(IntervalSample(timestamp=ts, value=r[2], end_timestamp=_parse_ts(r[1])))
+        ts = _dt(r[0])
+        if r[1] is not None:
+            samples.append(IntervalSample(timestamp=ts, value=r[2], end_timestamp=_dt(r[1])))
         else:
             samples.append(Sample(timestamp=ts, value=r[2]))
 
@@ -310,9 +328,9 @@ async def service_sleep_sessions(request: Request) -> dict:
 
             # Sleep stages
             stage_rows = await (await conn.execute(
-                """SELECT start_ts, end_ts, value FROM samples
+                """SELECT timestamp_unix, end_unix, value FROM samples
                    WHERE sleep_session_id = ? AND metric = 'sleep_stage'
-                   ORDER BY start_ts""",
+                   ORDER BY timestamp_unix""",
                 (session_id,),
             )).fetchall()
 
@@ -321,9 +339,9 @@ async def service_sleep_sessions(request: Request) -> dict:
                     source=SOURCE,
                     samples=[
                         IntervalSample(
-                            timestamp=_parse_ts(r[0]),
+                            timestamp=_dt(r[0]),
                             value=STAGE_MAP.get(r[2], SleepStage.UNKNOWN),
-                            end_timestamp=_parse_ts(r[1]),
+                            end_timestamp=_dt(r[1]),
                         )
                         for r in stage_rows
                     ],
@@ -331,36 +349,36 @@ async def service_sleep_sessions(request: Request) -> dict:
 
             # HR time series
             hr_rows = await (await conn.execute(
-                """SELECT start_ts, end_ts, value FROM samples
+                """SELECT timestamp_unix, end_unix, value FROM samples
                    WHERE sleep_session_id = ? AND metric = 'heart_rate'
-                   ORDER BY start_ts""",
+                   ORDER BY timestamp_unix""",
                 (session_id,),
             )).fetchall()
 
             if hr_rows:
                 hr_samples: list = []
                 for r in hr_rows:
-                    if r[1]:
-                        hr_samples.append(IntervalSample(timestamp=_parse_ts(r[0]), value=r[2], end_timestamp=_parse_ts(r[1])))
+                    if r[1] is not None:
+                        hr_samples.append(IntervalSample(timestamp=_dt(r[0]), value=r[2], end_timestamp=_dt(r[1])))
                     else:
-                        hr_samples.append(Sample(timestamp=_parse_ts(r[0]), value=r[2]))
+                        hr_samples.append(Sample(timestamp=_dt(r[0]), value=r[2]))
                 kwargs["heart_rate"] = HeartRate(source=SOURCE, samples=hr_samples)
 
             # HRV time series
             hrv_rows = await (await conn.execute(
-                """SELECT start_ts, end_ts, value FROM samples
+                """SELECT timestamp_unix, end_unix, value FROM samples
                    WHERE sleep_session_id = ? AND metric = 'hrv'
-                   ORDER BY start_ts""",
+                   ORDER BY timestamp_unix""",
                 (session_id,),
             )).fetchall()
 
             if hrv_rows:
                 hrv_samples: list = []
                 for r in hrv_rows:
-                    if r[1]:
-                        hrv_samples.append(IntervalSample(timestamp=_parse_ts(r[0]), value=r[2], end_timestamp=_parse_ts(r[1])))
+                    if r[1] is not None:
+                        hrv_samples.append(IntervalSample(timestamp=_dt(r[0]), value=r[2], end_timestamp=_dt(r[1])))
                     else:
-                        hrv_samples.append(Sample(timestamp=_parse_ts(r[0]), value=r[2]))
+                        hrv_samples.append(Sample(timestamp=_dt(r[0]), value=r[2]))
                 kwargs["hrv"] = HRV_RMSSD(source=SOURCE, samples=hrv_samples)
 
             # Sleep score from daily_metrics

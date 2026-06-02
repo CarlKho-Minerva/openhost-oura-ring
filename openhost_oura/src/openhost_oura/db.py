@@ -31,10 +31,12 @@ CREATE TABLE IF NOT EXISTS samples (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL DEFAULT 'oura',
     metric TEXT NOT NULL,
-    start_ts TEXT NOT NULL,
-    end_ts TEXT,
+    timestamp_unix INTEGER NOT NULL,  -- unix epoch milliseconds
+    end_unix INTEGER,                 -- unix epoch milliseconds; null for instantaneous samples
     value REAL NOT NULL,
-    sleep_session_id INTEGER REFERENCES sleep_sessions(id) ON DELETE CASCADE
+    hr_source TEXT,                   -- Oura heart-rate source: awake/rest/sleep/workout/live/session
+    sleep_session_id INTEGER REFERENCES sleep_sessions(id) ON DELETE CASCADE,
+    UNIQUE(metric, timestamp_unix)
 );
 
 CREATE TABLE IF NOT EXISTS daily_metrics (
@@ -46,9 +48,7 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     UNIQUE(source, date, metric)
 );
 
-CREATE INDEX IF NOT EXISTS idx_samples_metric_ts ON samples(metric, start_ts);
 CREATE INDEX IF NOT EXISTS idx_samples_session ON samples(sleep_session_id);
-CREATE INDEX IF NOT EXISTS idx_samples_source_metric_ts ON samples(source, metric, start_ts);
 CREATE INDEX IF NOT EXISTS idx_daily_metric_date ON daily_metrics(metric, date);
 CREATE INDEX IF NOT EXISTS idx_sleep_sessions_dates ON sleep_sessions(start_ts, end_ts);
 """

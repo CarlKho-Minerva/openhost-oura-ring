@@ -516,7 +516,7 @@ dev = [
 [[package]]
 name = "openhost-test-harness"
 version = "0.1.0"
-source = { git = "https://github.com/imbue-openhost/openhost-app-test-harness?rev=main#ec5337ea5935e9c503690f7d507289bce9407528" }
+source = { git = "https://github.com/imbue-openhost/openhost-app-test-harness?rev=main#78098b869191221dbcaa6ce3f3c753c620e32835" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
