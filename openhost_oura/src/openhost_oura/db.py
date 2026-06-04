@@ -48,7 +48,10 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     UNIQUE(source, date, metric)
 );
 
-CREATE INDEX IF NOT EXISTS idx_samples_session ON samples(sleep_session_id);
+-- Composite index so per-session lookups (filter by session + metric, ordered
+-- by time) hit one session's rows directly instead of scanning a whole metric.
+CREATE INDEX IF NOT EXISTS idx_samples_session_metric ON samples(sleep_session_id, metric, timestamp_unix);
+DROP INDEX IF EXISTS idx_samples_session;
 CREATE INDEX IF NOT EXISTS idx_daily_metric_date ON daily_metrics(metric, date);
 CREATE INDEX IF NOT EXISTS idx_sleep_sessions_dates ON sleep_sessions(start_ts, end_ts);
 """

@@ -44,6 +44,12 @@ def test_api_workouts_empty(stack):
     assert r.json()["data"] == []
 
 
+def test_api_sleep_sessions_no_series(stack):
+    r = httpx.get(f"{stack.url}/api/v1/sleep-sessions?limit=60&include_series=false")
+    assert r.status_code == 200
+    assert r.json()["data"] == []
+
+
 def test_backfill_requires_token(stack):
     r = httpx.post(f"{stack.url}/backfill")
     assert r.status_code == 201

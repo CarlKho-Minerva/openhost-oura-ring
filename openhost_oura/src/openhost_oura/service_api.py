@@ -281,6 +281,7 @@ async def service_sleep_sessions(request: Request) -> dict:
     start = request.query_params.get("start")
     end = request.query_params.get("end")
     limit = int(request.query_params.get("limit", "100"))
+    include_series = request.query_params.get("include_series", "true").lower() != "false"
 
     conditions = []
     params: list = []
@@ -323,6 +324,18 @@ async def service_sleep_sessions(request: Request) -> dict:
                 scalar = _make_scalar(m_name, m_val)
                 if scalar is not None:
                     kwargs[field] = scalar
+
+            if not include_series:
+                # Sleep score from daily_metrics (scalars only, no per-sample series)
+                date_str = s[3][:10]
+                score_row = await (await conn.execute(
+                    "SELECT value FROM daily_metrics WHERE date = ? AND metric = 'sleep_score'",
+                    (date_str,),
+                )).fetchone()
+                if score_row:
+                    kwargs["sleep_score"] = Score(value=score_row[0], source=SOURCE, display_name="Sleep Score")
+                result.append(SleepSession(**kwargs))
+                continue
 
             # Sleep stages
             stage_rows = await (await conn.execute(

@@ -147,12 +147,15 @@ function sv(obj){return obj?obj.value:null;}
 function durMin(obj){return obj?obj.value:0;} // Duration scalars are in minutes
 
 async function loadDashboard(){
+  const today=getToday();
+  // History needs only scalar fields, so skip the per-night sample series here;
+  // the last-night charts fetch their series separately below.
   const [sessions,readinessTsResp,sleepScoreTsResp,tempDevResp,tempTrendResp]=await Promise.all([
-    fetchJSON('/api/v1/sleep-sessions?limit=60'),
+    fetchJSON('/api/v1/sleep-sessions?limit=60&include_series=false'),
     fetchJSON('/api/v1/time-series?metric=readiness_score'),
     fetchJSON('/api/v1/time-series?metric=sleep_score'),
-    fetchJSON('/api/v1/time-series?metric=temperature_deviation'),
-    fetchJSON('/api/v1/time-series?metric=temperature_trend_deviation'),
+    fetchJSON(`/api/v1/time-series?metric=temperature_deviation&start=${today}&end=${today}`),
+    fetchJSON(`/api/v1/time-series?metric=temperature_trend_deviation&start=${today}&end=${today}`),
   ]);
 
   // Also fetch readiness contributors for today
@@ -165,7 +168,6 @@ async function loadDashboard(){
   const allSess=sessions.data.slice().reverse();
   // Filter out junk micro-sessions (< 30 min = 0.5 in minutes)
   const sess=allSess.filter(s=>durMin(s.total_duration)>=30);
-  const today=getToday();
 
   // Find last real sleep session
   const lastReal=sessions.data.find(s=>durMin(s.total_duration)>=30);
@@ -186,25 +188,23 @@ async function loadDashboard(){
   (tempDevResp.samples||[]).forEach(s=>{tempDevMap[s.timestamp.slice(0,10)]=s.value;});
   (tempTrendResp.samples||[]).forEach(s=>{tempTrendMap[s.timestamp.slice(0,10)]=s.value;});
 
-  // Fetch readiness contributors for today
+  // Fetch readiness contributors for today (single day only)
   const todayContribs={};
   if(readinessMap[today]!=null){
-    const contribResults=await Promise.all(readinessContribMetrics.map(m=>fetchJSON(`/api/v1/time-series?metric=${m}`)));
+    const contribResults=await Promise.all(readinessContribMetrics.map(m=>fetchJSON(`/api/v1/time-series?metric=${m}&start=${today}&end=${today}`)));
     readinessContribMetrics.forEach((m,i)=>{
-      const samples=contribResults[i].samples||[];
-      const todaySample=samples.find(s=>s.timestamp.slice(0,10)===today);
-      if(todaySample) todayContribs[m]=todaySample.value;
+      const sample=(contribResults[i].samples||[])[0];
+      if(sample) todayContribs[m]=sample.value;
     });
   }
 
-  // Fetch sleep score contributors for last night
+  // Fetch sleep score contributors for last night (single day only)
   const sleepContribs={};
   if(lastNightDay && sleepScoreMap[lastNightDay]!=null){
-    const contribResults=await Promise.all(sleepScoreContribMetrics.map(m=>fetchJSON(`/api/v1/time-series?metric=${m}`)));
+    const contribResults=await Promise.all(sleepScoreContribMetrics.map(m=>fetchJSON(`/api/v1/time-series?metric=${m}&start=${lastNightDay}&end=${lastNightDay}`)));
     sleepScoreContribMetrics.forEach((m,i)=>{
-      const samples=contribResults[i].samples||[];
-      const daySample=samples.find(s=>s.timestamp.slice(0,10)===lastNightDay);
-      if(daySample) sleepContribs[m]=daySample.value;
+      const sample=(contribResults[i].samples||[])[0];
+      if(sample) sleepContribs[m]=sample.value;
     });
   }
 
@@ -314,7 +314,11 @@ async function loadDashboard(){
   if(isToday){
     const timeFmt=d=>new Date(d.timestamp).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'});
 
-    const stageData=lastReal.stages;
+    // History fetch omits per-night series; fetch the series for the latest night here.
+    const detailResp=await fetchJSON('/api/v1/sleep-sessions?limit=3');
+    const detail=(detailResp.data||[]).find(s=>s.id===lastReal.id)||lastReal;
+
+    const stageData=detail.stages;
     if(stageData && stageData.samples && stageData.samples.length>0){
       const sLabels={deep:'Deep',light:'Light',rem:'REM',awake:'Awake'};
       const sColors={deep:C.indigo,light:C.slate,rem:C.cyan,awake:C.amber};
@@ -324,14 +328,14 @@ async function loadDashboard(){
         options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false},tooltip:{callbacks:{label:c=>{const rev={1:'Deep',2:'Light',3:'REM',4:'Awake'};return rev[c.raw]||c.raw;}}}},scales:{...chartOpts.scales,y:{...chartOpts.scales.y,min:0.5,max:4.5,ticks:{...chartOpts.scales.y.ticks,callback:v=>{const m={1:'Deep',2:'Light',3:'REM',4:'Awake'};return m[v]||'';}}}}}});
     }
 
-    const hrData=lastReal.heart_rate;
+    const hrData=detail.heart_rate;
     if(hrData && hrData.samples && hrData.samples.length>0){
       new Chart(document.getElementById('lastHr'),{type:'line',
         data:{labels:hrData.samples.map(timeFmt),datasets:[{label:'bpm',data:hrData.samples.map(d=>d.value),borderColor:C.rose,tension:0.3,pointRadius:0,borderWidth:1.5}]},
         options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false}}}});
     }
 
-    const hrvData=lastReal.hrv;
+    const hrvData=detail.hrv;
     if(hrvData && hrvData.samples && hrvData.samples.length>0){
       new Chart(document.getElementById('lastHrv'),{type:'line',
         data:{labels:hrvData.samples.map(timeFmt),datasets:[{label:'ms',data:hrvData.samples.map(d=>d.value),borderColor:C.cyan,tension:0.3,pointRadius:0,borderWidth:1.5,fill:true,backgroundColor:'rgba(6,182,212,0.08)'}]},
