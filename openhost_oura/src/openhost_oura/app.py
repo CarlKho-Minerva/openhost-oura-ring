@@ -127,6 +127,35 @@ async def trigger_sync() -> dict:
         return {"status": "error", "detail": str(e)}
 
 
+@post("/backfill")
+async def trigger_backfill() -> dict:
+    token = await db.get_config("oura_access_token")
+    if not token:
+        return {"error": "Not configured"}
+    global _backfill_running
+    if _backfill_running or await db.get_config("backfill_state") == "running":
+        return {"status": "already_running"}
+    _backfill_running = True
+    asyncio.create_task(_run_backfill())
+    return {"status": "started"}
+
+
+@get("/api/backfill-status")
+async def backfill_status() -> dict:
+    state = await db.get_config("backfill_state") or "idle"
+    start = await db.get_config("backfill_start")
+    cursor = await db.get_config("backfill_cursor")
+    progress = 0.0
+    if start and cursor:
+        start_d = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+        cursor_d = datetime.fromisoformat(cursor).replace(tzinfo=timezone.utc)
+        today = datetime.now(timezone.utc)
+        span = (today - start_d).total_seconds()
+        if span > 0:
+            progress = max(0.0, min(1.0, (cursor_d - start_d).total_seconds() / span))
+    return {"state": state, "start": start, "cursor": cursor, "progress": progress}
+
+
 @post("/reset-data")
 async def reset_data() -> dict:
     async with db.connect() as conn:
@@ -152,6 +181,20 @@ async def _background_sync():
         log.exception("Background sync failed")
 
 
+_backfill_running = False
+
+
+async def _run_backfill():
+    global _backfill_running
+    try:
+        await oura.backfill()
+        log.info("Backfill completed")
+    except Exception:
+        log.exception("Backfill failed")
+    finally:
+        _backfill_running = False
+
+
 async def _periodic_sync():
     await asyncio.sleep(10)
     while True:
@@ -167,6 +210,10 @@ async def _periodic_sync():
 async def on_startup() -> None:
     await db.init_db()
     asyncio.create_task(_periodic_sync())
+    if await db.get_config("backfill_state") == "running":
+        global _backfill_running
+        _backfill_running = True
+        asyncio.create_task(_run_backfill())
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +242,7 @@ app = Litestar(
     route_handlers=[
         health_check, index, setup_page, start_oauth,
         oauth_callback, get_status, trigger_sync, reset_data,
+        trigger_backfill, backfill_status,
         *service_routes,
     ],
     on_startup=[on_startup],

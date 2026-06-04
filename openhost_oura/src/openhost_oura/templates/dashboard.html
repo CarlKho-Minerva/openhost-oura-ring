@@ -43,7 +43,9 @@
   <h1>Oura</h1>
   <div class="actions">
     <span id="last-sync" style="font-size:0.75rem;color:#64748b;align-self:center"></span>
+    <span id="backfill-status" style="font-size:0.75rem;color:#64748b;align-self:center"></span>
     <button class="btn btn-primary" onclick="doSync()">Sync Now</button>
+    <button class="btn btn-secondary" id="backfill-btn" onclick="doBackfill()">Backfill full history</button>
     <a class="btn btn-secondary" href="/setup">Settings</a>
   </div>
 </div>
@@ -105,6 +107,35 @@ async function doSync(){
 }
 
 fetch('/api/status').then(r=>r.json()).then(d=>{if(d.last_sync)showLastSync(d.last_sync);}).catch(()=>{});
+
+let backfillPoll=null;
+function renderBackfill(d){
+  const el=document.getElementById('backfill-status');
+  const btn=document.getElementById('backfill-btn');
+  if(d.state==='running'){
+    el.textContent='Backfilling… '+Math.round((d.progress||0)*100)+'%';
+    btn.disabled=true;btn.textContent='Backfilling…';
+    return true;
+  }
+  btn.disabled=false;btn.textContent='Backfill full history';
+  if(d.state==='done'){el.textContent='Backfill complete';}
+  else if(d.state==='error'){el.textContent='Backfill failed';}
+  else{el.textContent='';}
+  return false;
+}
+function pollBackfill(){
+  fetch('/api/backfill-status').then(r=>r.json()).then(d=>{
+    const running=renderBackfill(d);
+    if(running&&!backfillPoll){backfillPoll=setInterval(pollBackfill,3000);}
+    else if(!running&&backfillPoll){clearInterval(backfillPoll);backfillPoll=null;}
+  }).catch(()=>{});
+}
+async function doBackfill(){
+  if(!confirm('Pull your entire Oura history? This runs in the background and may take a while.'))return;
+  await fetch('/backfill',{method:'POST'});
+  pollBackfill();
+}
+pollBackfill();
 
 function contribBar(label,val,color){
   if(val==null)return'';

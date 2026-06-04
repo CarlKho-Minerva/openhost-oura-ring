@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 import logging
 from datetime import datetime, timedelta, timezone
@@ -82,14 +83,34 @@ async def get_access_token() -> str | None:
     return await refresh_access_token()
 
 
+MAX_RETRIES = 6
+MAX_BACKOFF = 60
+
+
+async def _get_with_retry(
+    client: httpx.AsyncClient, url: str, headers: dict, params: dict
+) -> httpx.Response:
+    """GET that retries on 429, honoring Retry-After (only present on the 429)."""
+    for attempt in range(MAX_RETRIES):
+        resp = await client.get(url, headers=headers, params=params)
+        if resp.status_code != 429:
+            resp.raise_for_status()
+            return resp
+        retry_after = resp.headers.get("Retry-After")
+        delay = int(retry_after) if retry_after and retry_after.isdigit() else min(2 ** attempt, MAX_BACKOFF)
+        log.warning("Rate limited (429); retrying in %ds (attempt %d)", delay, attempt + 1)
+        await asyncio.sleep(delay)
+    resp.raise_for_status()
+    return resp
+
+
 async def _fetch_paginated(
     client: httpx.AsyncClient, url: str, headers: dict, params: dict
 ) -> list:
     all_data = []
     p = dict(params)
     while True:
-        resp = await client.get(url, headers=headers, params=p)
-        resp.raise_for_status()
+        resp = await _get_with_retry(client, url, headers, p)
         body = resp.json()
         all_data.extend(body.get("data", []))
         next_token = body.get("next_token")
@@ -119,13 +140,69 @@ async def sync_all(days: int | None = None):
     headers = {"Authorization": f"Bearer {token}"}
 
     async with httpx.AsyncClient(timeout=60) as client:
-        await _sync_sleep(client, headers, start_date, end_date)
-        await _sync_heartrate(client, headers, start_date, end_date)
-        await _sync_daily_readiness(client, headers, start_date, end_date)
-        await _sync_daily_sleep(client, headers, start_date, end_date)
+        await _sync_window(client, headers, start_date, end_date)
 
     await db.set_config("last_sync", datetime.now(timezone.utc).isoformat())
     log.info("Sync complete for %s to %s", start_date, end_date)
+
+
+async def _sync_window(client, headers, start_date: str, end_date: str):
+    """Sync all four collections for a [start_date, end_date] window (YYYY-MM-DD)."""
+    await _sync_sleep(client, headers, start_date, end_date)
+    await _sync_heartrate(
+        client, headers, f"{start_date}T00:00:00+00:00", f"{end_date}T00:00:00+00:00"
+    )
+    await _sync_daily_readiness(client, headers, start_date, end_date)
+    await _sync_daily_sleep(client, headers, start_date, end_date)
+
+
+BACKFILL_DEFAULT_START = "2016-01-01"
+
+
+def _add_month(d: datetime) -> datetime:
+    """First day of the month after d's month."""
+    year = d.year + (d.month // 12)
+    month = d.month % 12 + 1
+    return d.replace(year=year, month=month, day=1)
+
+
+async def backfill():
+    """Walk the full history in monthly chunks, resuming from a persisted cursor.
+
+    Idempotent: every chunk re-syncs through the same upserting helpers, so a
+    repeated or interrupted run never duplicates data.
+    """
+    token = await get_access_token()
+    if not token:
+        raise RuntimeError("No Oura access token configured")
+
+    start_str = await db.get_config("backfill_start") or BACKFILL_DEFAULT_START
+    await db.set_config("backfill_start", start_str)
+
+    cursor_str = await db.get_config("backfill_cursor") or start_str
+    cursor = datetime.fromisoformat(cursor_str).replace(day=1, tzinfo=timezone.utc)
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    await db.set_config("backfill_state", "running")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            while cursor <= today:
+                chunk_start = cursor.strftime("%Y-%m-%d")
+                chunk_end = _add_month(cursor).strftime("%Y-%m-%d")
+                log.info("Backfill chunk %s..%s", chunk_start, chunk_end)
+                await _sync_window(client, headers, chunk_start, chunk_end)
+                cursor = _add_month(cursor)
+                await db.set_config("backfill_cursor", cursor.strftime("%Y-%m-%d"))
+    except Exception:
+        await db.set_config("backfill_state", "error")
+        log.exception("Backfill failed")
+        raise
+
+    await db.set_config("backfill_state", "done")
+    await db.set_config("last_sync", datetime.now(timezone.utc).isoformat())
+    log.info("Backfill complete from %s", start_str)
 
 
 async def _sync_sleep(client, headers, start_date, end_date):
@@ -294,12 +371,13 @@ def _insert_sleep_stages(
         ))
 
 
-async def _sync_heartrate(client, headers, start_date, end_date):
+async def _sync_heartrate(client, headers, start_datetime, end_datetime):
+    # The heartrate endpoint ignores start_date/end_date; it only honors datetimes.
     records = await _fetch_paginated(
         client,
         f"{OURA_API}/usercollection/heartrate",
         headers,
-        {"start_date": start_date, "end_date": end_date},
+        {"start_datetime": start_datetime, "end_datetime": end_datetime},
     )
     log.info("Fetched %d heartrate records", len(records))
 

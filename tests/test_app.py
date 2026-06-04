@@ -42,3 +42,17 @@ def test_api_workouts_empty(stack):
     r = httpx.get(f"{stack.url}/api/v1/workouts")
     assert r.status_code == 200
     assert r.json()["data"] == []
+
+
+def test_backfill_requires_token(stack):
+    r = httpx.post(f"{stack.url}/backfill")
+    assert r.status_code == 201
+    assert r.json().get("error") == "Not configured"
+
+
+def test_backfill_status_idle(stack):
+    r = httpx.get(f"{stack.url}/api/backfill-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "idle"
+    assert body["progress"] == 0.0
