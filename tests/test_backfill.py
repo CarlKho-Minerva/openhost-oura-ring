@@ -92,6 +92,29 @@ def test_backfill_chunks_and_resumes(monkeypatch, tmp_path):
     assert cursor > "2026-01-01"
 
 
+def test_heartrate_range_splits_into_30_day_windows(monkeypatch):
+    windows = []
+
+    async def fake_hr(client, headers, start, end):
+        windows.append((start, end))
+
+    monkeypatch.setattr(oura, "_sync_heartrate", fake_hr)
+
+    # 31-day month must split so no window exceeds 30 days.
+    asyncio.run(oura._sync_heartrate_range(None, {}, "2023-01-01", "2023-02-01"))
+
+    from datetime import datetime
+
+    assert len(windows) == 2
+    for start, end in windows:
+        span = datetime.fromisoformat(end) - datetime.fromisoformat(start)
+        assert span.days <= 30
+    # Windows tile the full range contiguously.
+    assert windows[0][0].startswith("2023-01-01")
+    assert windows[0][1] == windows[1][0]
+    assert windows[-1][1].startswith("2023-02-01")
+
+
 def test_backfill_marks_error(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "t.db"))
 

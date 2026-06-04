@@ -149,11 +149,24 @@ async def sync_all(days: int | None = None):
 async def _sync_window(client, headers, start_date: str, end_date: str):
     """Sync all four collections for a [start_date, end_date] window (YYYY-MM-DD)."""
     await _sync_sleep(client, headers, start_date, end_date)
-    await _sync_heartrate(
-        client, headers, f"{start_date}T00:00:00+00:00", f"{end_date}T00:00:00+00:00"
-    )
+    await _sync_heartrate_range(client, headers, start_date, end_date)
     await _sync_daily_readiness(client, headers, start_date, end_date)
     await _sync_daily_sleep(client, headers, start_date, end_date)
+
+
+# The heartrate endpoint rejects ranges longer than 30 days; daily endpoints don't.
+HR_MAX_DAYS = 30
+
+
+async def _sync_heartrate_range(client, headers, start_date: str, end_date: str):
+    """Fetch heartrate across [start_date, end_date] in <=30-day sub-windows."""
+    start = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+    end = datetime.fromisoformat(end_date).replace(tzinfo=timezone.utc)
+    cur = start
+    while cur < end:
+        chunk_end = min(cur + timedelta(days=HR_MAX_DAYS), end)
+        await _sync_heartrate(client, headers, cur.isoformat(), chunk_end.isoformat())
+        cur = chunk_end
 
 
 BACKFILL_DEFAULT_START = "2016-01-01"
