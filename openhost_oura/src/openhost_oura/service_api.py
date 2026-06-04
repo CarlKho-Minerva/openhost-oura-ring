@@ -10,14 +10,6 @@ from datetime import datetime, timezone
 
 import attrs
 from health_data_service import (
-    IntervalSample,
-    MetricKind,
-    MetricType,
-    Sample,
-    SleepSession,
-    TimeSeries,
-)
-from health_data_service.specific_types import (
     BreathRateAvg,
     Count,
     Duration,
@@ -27,9 +19,15 @@ from health_data_service.specific_types import (
     HeartRateMin,
     HRV_RMSSD,
     HRVAvg,
+    IntervalSample,
+    MetricKind,
+    MetricType,
+    Sample,
     Score,
+    SleepSession,
     SleepStage,
     SleepStages,
+    TimeSeries,
 )
 from litestar import Request, get
 
