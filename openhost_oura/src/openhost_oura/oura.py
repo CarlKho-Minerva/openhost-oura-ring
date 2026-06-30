@@ -90,9 +90,21 @@ MAX_BACKOFF = 60
 async def _get_with_retry(
     client: httpx.AsyncClient, url: str, headers: dict, params: dict
 ) -> httpx.Response:
-    """GET that retries on 429, honoring Retry-After (only present on the 429)."""
+    """GET that retries on 429 (honoring Retry-After) and refreshes the token once on 401.
+
+    The access token expires (~24h); on a 401 we refresh it and mutate the shared
+    `headers` so the rest of the sync reuses the new token.
+    """
+    refreshed = False
     for attempt in range(MAX_RETRIES):
         resp = await client.get(url, headers=headers, params=params)
+        if resp.status_code == 401 and not refreshed:
+            refreshed = True
+            new_token = await refresh_access_token()
+            if new_token:
+                headers["Authorization"] = f"Bearer {new_token}"
+                continue
+            log.error("Got 401 and token refresh failed; re-authorization required")
         if resp.status_code != 429:
             resp.raise_for_status()
             return resp
@@ -143,7 +155,20 @@ async def sync_all(days: int | None = None):
         await _sync_window(client, headers, start_date, end_date)
 
     await db.set_config("last_sync", datetime.now(timezone.utc).isoformat())
+    await db.set_config("last_sync_error", "")
     log.info("Sync complete for %s to %s", start_date, end_date)
+
+
+def error_message(exc: Exception) -> str:
+    """Human-readable reason for a failed sync, for display in the UI."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (401, 403):
+            return "Oura authorization expired. Open Settings and reconnect your Oura account."
+        return f"Oura API returned HTTP {code}."
+    if isinstance(exc, httpx.HTTPError):
+        return f"Couldn't reach Oura: {exc}"
+    return str(exc) or exc.__class__.__name__
 
 
 async def _sync_window(client, headers, start_date: str, end_date: str):

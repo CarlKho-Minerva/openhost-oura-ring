@@ -34,6 +34,7 @@
 <div class="card">
   <h1>Oura</h1>
   <p class="status">Status: {{status}} &middot; Last sync: {{last_sync}}</p>
+  {{error_banner}}
 
   <h2>Connect to Oura</h2>
   <form method="POST" action="/setup/oauth">

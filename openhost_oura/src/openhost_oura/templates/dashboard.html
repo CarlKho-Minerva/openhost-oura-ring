@@ -49,6 +49,7 @@
     <a class="btn btn-secondary" href="/setup">Settings</a>
   </div>
 </div>
+<div id="sync-error" style="display:none;background:#7f1d1d;color:#fecaca;border:1px solid #b91c1c;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1.5rem;font-size:0.85rem"></div>
 <div id="app"></div>
 
 <script>
@@ -95,18 +96,37 @@ function showLastSync(ts){
   el.textContent='Synced '+ago;
 }
 
+function showSyncError(msg){
+  const el=document.getElementById('sync-error');
+  if(!msg){el.style.display='none';el.textContent='';return;}
+  el.textContent='Sync failed: '+msg;
+  el.style.display='block';
+}
+
 async function doSync(){
   const b=document.querySelector('.btn-primary');b.textContent='Syncing...';b.disabled=true;
   try{
     const r=await fetch('/sync',{method:'POST'});
-    const data=await r.json();
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok||data.status==='error'){
+      showSyncError(data.detail||('HTTP '+r.status));
+      b.textContent='Sync Now';b.disabled=false;
+      return;
+    }
+    showSyncError(null);
     if(data.last_sync) showLastSync(data.last_sync);
     b.textContent='Sync Now';b.disabled=false;
     location.reload();
-  }catch(e){b.textContent='Sync Failed';setTimeout(()=>{b.textContent='Sync Now';b.disabled=false;},2000);}
+  }catch(e){
+    showSyncError('Could not reach the server. '+e);
+    b.textContent='Sync Now';b.disabled=false;
+  }
 }
 
-fetch('/api/status').then(r=>r.json()).then(d=>{if(d.last_sync)showLastSync(d.last_sync);}).catch(()=>{});
+fetch('/api/status').then(r=>r.json()).then(d=>{
+  if(d.last_sync)showLastSync(d.last_sync);
+  showSyncError(d.last_error);
+}).catch(()=>{});
 
 let backfillPoll=null;
 function renderBackfill(d){

@@ -4,6 +4,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timezone
+from html import escape as html_escape
 from pathlib import Path
 
 from litestar import Litestar, Request, get, post
@@ -52,10 +53,21 @@ async def setup_page() -> Response:
     client_id = await db.get_config("oura_client_id") or ""
     token = await db.get_config("oura_access_token")
     last_sync = await db.get_config("last_sync") or "never"
+    last_error = await db.get_config("last_sync_error")
     status = "connected" if token else "not connected"
-    html = SETUP_HTML.replace("{{client_id}}", client_id).replace(
-        "{{status}}", status
-    ).replace("{{last_sync}}", last_sync)
+    error_banner = ""
+    if last_error:
+        error_banner = (
+            '<p class="status" style="color:#fca5a5;background:#7f1d1d;'
+            'border:1px solid #b91c1c;border-radius:8px;padding:0.6rem 0.8rem">'
+            f"{html_escape(last_error)}</p>"
+        )
+    html = (
+        SETUP_HTML.replace("{{client_id}}", client_id)
+        .replace("{{status}}", status)
+        .replace("{{last_sync}}", last_sync)
+        .replace("{{error_banner}}", error_banner)
+    )
     return Response(content=html, media_type="text/html")
 
 
@@ -110,21 +122,27 @@ async def oauth_callback(request: Request) -> Response:
 @get("/api/status")
 async def get_status() -> dict:
     last_sync = await db.get_config("last_sync")
-    return {"last_sync": last_sync}
+    last_error = await db.get_config("last_sync_error") or None
+    return {"last_sync": last_sync, "last_error": last_error}
 
 
 @post("/sync")
-async def trigger_sync() -> dict:
+async def trigger_sync() -> Response:
     token = await db.get_config("oura_access_token")
     if not token:
-        return {"error": "Not configured"}
+        return Response(
+            {"status": "error", "detail": "Not connected to Oura. Open Settings to connect."},
+            status_code=400,
+        )
     try:
         await oura.sync_all(days=30)
         last_sync = await db.get_config("last_sync")
-        return {"status": "ok", "last_sync": last_sync}
+        return Response({"status": "ok", "last_sync": last_sync})
     except Exception as e:
+        msg = oura.error_message(e)
+        await db.set_config("last_sync_error", msg)
         log.exception("Sync failed")
-        return {"status": "error", "detail": str(e)}
+        return Response({"status": "error", "detail": msg}, status_code=502)
 
 
 @post("/backfill")
@@ -177,7 +195,8 @@ async def _background_sync():
     try:
         await oura.sync_all(days=30)
         log.info("Background sync completed")
-    except Exception:
+    except Exception as e:
+        await db.set_config("last_sync_error", oura.error_message(e))
         log.exception("Background sync failed")
 
 
@@ -202,7 +221,8 @@ async def _periodic_sync():
         if token:
             try:
                 await oura.sync_all()
-            except Exception:
+            except Exception as e:
+                await db.set_config("last_sync_error", oura.error_message(e))
                 log.exception("Periodic sync failed")
         await asyncio.sleep(600)
 

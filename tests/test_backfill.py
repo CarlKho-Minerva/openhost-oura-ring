@@ -1,5 +1,8 @@
 import asyncio
 
+import httpx
+import pytest
+
 from openhost_oura import oura, db
 
 
@@ -13,7 +16,8 @@ class FakeResp:
         return self._body
 
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError("error", request=None, response=self)
 
 
 class FakeClient:
@@ -62,6 +66,58 @@ def test_fetch_paginated_exponential_fallback(monkeypatch):
 
     assert result == [{"a": 1}]
     assert slept == [1, 2]  # 2**0, 2**1
+
+
+def test_get_with_retry_refreshes_on_401(monkeypatch):
+    refreshed = []
+
+    async def fake_refresh():
+        refreshed.append(True)
+        return "newtok"
+
+    monkeypatch.setattr(oura, "refresh_access_token", fake_refresh)
+    client = FakeClient([FakeResp(401), FakeResp(200, data=[{"a": 1}])])
+    headers = {"Authorization": "Bearer oldtok"}
+
+    resp = asyncio.run(oura._get_with_retry(client, "url", headers, {}))
+
+    assert resp.status_code == 200
+    assert refreshed == [True]  # refreshed exactly once
+    assert headers["Authorization"] == "Bearer newtok"  # shared headers updated for rest of sync
+
+
+def test_get_with_retry_raises_when_refresh_fails(monkeypatch):
+    async def fake_refresh():
+        return None
+
+    monkeypatch.setattr(oura, "refresh_access_token", fake_refresh)
+    client = FakeClient([FakeResp(401)])
+
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(oura._get_with_retry(client, "url", {"Authorization": "Bearer old"}, {}))
+
+
+def test_error_message_maps_401_to_reconnect():
+    exc = httpx.HTTPStatusError("e", request=None, response=FakeResp(401))
+    assert "reconnect" in oura.error_message(exc).lower()
+
+
+def test_sync_all_clears_last_sync_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "t.db"))
+
+    async def fake_window(client, headers, start, end):
+        pass
+
+    monkeypatch.setattr(oura, "_sync_window", fake_window)
+
+    async def run():
+        await db.init_db()
+        await db.set_config("oura_access_token", "tok")
+        await db.set_config("last_sync_error", "stale error")
+        await oura.sync_all(days=1)
+        return await db.get_config("last_sync_error")
+
+    assert asyncio.run(run()) == ""
 
 
 def test_backfill_chunks_and_resumes(monkeypatch, tmp_path):
