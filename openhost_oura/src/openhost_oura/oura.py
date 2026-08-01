@@ -49,7 +49,28 @@ async def exchange_code(
         return resp.json()
 
 
+_refresh_lock = asyncio.Lock()
+
+
 async def refresh_access_token() -> str | None:
+    """Serialized, and re-checked after acquiring the lock.
+
+    Oura rotates refresh tokens on use: two concurrent refreshes (sync and
+    backfill both catching a 401 at the same moment) spend the same refresh
+    token twice, the second spend is rejected, and the token family dies --
+    surfacing as "authorization expired" minutes after a successful connect.
+    A waiter whose predecessor already refreshed reuses the fresh access token
+    instead of spending the rotation again.
+    """
+    before = await db.get_config("oura_access_token")
+    async with _refresh_lock:
+        current = await db.get_config("oura_access_token")
+        if current and current != before:
+            return current
+        return await _do_refresh()
+
+
+async def _do_refresh() -> str | None:
     refresh_token = await db.get_config("oura_refresh_token")
     client_id = await db.get_config("oura_client_id")
     client_secret = await db.get_config("oura_client_secret")
