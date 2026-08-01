@@ -3,400 +3,239 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Oura</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<title>oura</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-         background: #0f172a; color: #e2e8f0; padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
-  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-  h1 { font-size: 1.5rem; }
-  .actions { display: flex; gap: 0.75rem; }
-  .btn { padding: 0.4rem 1rem; border-radius: 6px; border: none; font-size: 0.8rem;
-         font-weight: 600; cursor: pointer; text-decoration: none; color: white; }
-  .btn-primary { background: #6366f1; }
-  .btn-secondary { background: #334155; color: #e2e8f0; }
-  section { margin-bottom: 2rem; }
-  .section-title { font-size: 1.15rem; font-weight: 600; margin-bottom: 0.75rem; display: flex; align-items: baseline; gap: 0.6rem; }
-  .section-title .date { font-size: 0.85rem; color: #64748b; font-weight: 400; }
-  .no-data { color: #475569; font-size: 0.9rem; padding: 1rem 0; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
-  .card { background: #1e293b; border-radius: 12px; padding: 1.25rem; }
-  .card h3 { font-size: 0.85rem; color: #64748b; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
-  .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.5rem; }
-  .metric { padding: 0.6rem; background: #0f172a; border-radius: 8px; }
-  .metric .val { font-size: 1.25rem; font-weight: 700; }
-  .metric .lbl { font-size: 0.7rem; color: #64748b; margin-top: 0.15rem; }
-  .score-ring { display: inline-flex; align-items: center; justify-content: center;
-    width: 56px; height: 56px; border-radius: 50%; font-size: 1.3rem; font-weight: 700; }
-  .score-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem; }
-  .score-label { font-size: 0.8rem; color: #94a3b8; }
-  .contrib-bar { height: 6px; border-radius: 3px; background: #334155; margin-top: 0.25rem; }
-  .contrib-fill { height: 100%; border-radius: 3px; }
-  .contrib-item { margin-bottom: 0.5rem; }
-  .contrib-head { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; }
-  canvas { width: 100% !important; }
+  :root {
+    --bg: #faf8f4; --card: #fffefb; --line: #e6e2d8;
+    --ink: #17150f; --muted: #8b8676; --faint: #b5b0a1;
+    --accent: #3056d3; --good: #2e7d4f; --bad: #b3452f;
+  }
+  body { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+         background: var(--bg); color: var(--ink);
+         padding: 2.2rem 1.6rem 4rem; max-width: 1180px; margin: 0 auto; }
+  a { color: inherit; }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+  .kicker { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 0.55rem; }
+  h1 { font-size: 2.4rem; font-weight: 600; letter-spacing: -0.02em; }
+  h1 .dim { color: var(--faint); }
+  .substat { font-size: 0.8rem; color: var(--muted); margin-top: 0.5rem; }
+  .actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .status-note { font-size: 0.72rem; color: var(--muted); margin-right: 0.4rem; }
+  .btn { padding: 0.42rem 0.95rem; border-radius: 999px; border: 1px solid var(--line);
+         background: var(--card); color: var(--ink); font-family: inherit;
+         font-size: 0.74rem; cursor: pointer; text-decoration: none; }
+  .btn:hover { border-color: var(--muted); }
+  .btn-primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .btn[disabled] { opacity: 0.5; cursor: default; }
+  .error { display: none; border: 1px solid var(--bad); color: var(--bad);
+           border-radius: 8px; padding: 0.7rem 1rem; margin-top: 1.2rem; font-size: 0.78rem; }
+  .section { margin-top: 2.6rem; }
+  .section > .label { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.8rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+          gap: 0.7rem; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 0.95rem 1rem 0.8rem; display: flex; flex-direction: column; gap: 0.45rem; }
+  .tile .name { font-size: 0.68rem; color: var(--muted); letter-spacing: 0.02em; }
+  .tile .value { font-size: 1.65rem; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+  .tile .value .unit { font-size: 0.72rem; font-weight: 400; color: var(--muted); margin-left: 0.18rem; }
+  .tile .delta { font-size: 0.68rem; color: var(--muted); }
+  .tile .delta .up { color: var(--good); } .tile .delta .down { color: var(--bad); }
+  .spark { margin-top: 0.15rem; }
+  .spark path { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+  .spark line { stroke: var(--line); stroke-width: 1; }
+  .empty { color: var(--faint); font-size: 0.8rem; padding: 0.6rem 0; }
+  .footer { margin-top: 3rem; font-size: 0.7rem; color: var(--faint); }
 </style>
 </head>
 <body>
-<div class="header">
-  <h1>Oura</h1>
+<div class="topbar">
+  <div>
+    <div class="kicker" id="today-line">…</div>
+    <h1><span id="greet">good day</span><span class="dim" id="cursor">█</span></h1>
+    <div class="substat" id="substat">— metrics · — days of history</div>
+  </div>
   <div class="actions">
-    <span id="last-sync" style="font-size:0.75rem;color:#64748b;align-self:center"></span>
-    <span id="backfill-status" style="font-size:0.75rem;color:#64748b;align-self:center"></span>
-    <button class="btn btn-primary" onclick="doSync()">Sync Now</button>
-    <button class="btn btn-secondary" id="backfill-btn" onclick="doBackfill()">Backfill full history</button>
-    <a class="btn btn-secondary" href="/setup">Settings</a>
+    <span class="status-note" id="last-sync"></span>
+    <span class="status-note" id="backfill-status"></span>
+    <button class="btn btn-primary" id="sync-btn" onclick="doSync()">sync now</button>
+    <button class="btn" id="backfill-btn" onclick="doBackfill()">backfill history</button>
+    <a class="btn" href="/setup">settings</a>
   </div>
 </div>
-<div id="sync-error" style="display:none;background:#7f1d1d;color:#fecaca;border:1px solid #b91c1c;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1.5rem;font-size:0.85rem"></div>
-<div id="app"></div>
+<div class="error" id="sync-error"></div>
+<div id="app"><div class="empty" style="margin-top:2rem">loading…</div></div>
+<div class="footer">every metric the ring reports lands here — new collections appear automatically. raw db: app_data/oura/sqlite/health.db</div>
 
 <script>
-const C = { indigo:'#6366f1', cyan:'#06b6d4', emerald:'#10b981', amber:'#f59e0b',
-            rose:'#f43f5e', purple:'#a855f7', slate:'#64748b', sky:'#38bdf8' };
-const chartOpts = {
-  responsive:true,
-  plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}},
-  scales:{
-    x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'#1e293b'}},
-    y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'#1e293b'}},
-  },
-};
-async function fetchJSON(u){return(await fetch(u)).json();}
-function toH(s){return(s/3600).toFixed(1);}
-function toHM(s){const h=Math.floor(s/3600),m=Math.round((s%3600)/60);return h>0?h+'h '+m+'m':m+'m';}
-function scoreColor(v){return v>=85?C.emerald:v>=70?C.amber:C.rose;}
+/* ---------- greeting ---------- */
+const now = new Date();
+const H = parseInt(now.toLocaleTimeString('en-US',{timeZone:'America/Los_Angeles',hour12:false,hour:'numeric'}));
+const greet = H<5 ? 'good night' : H<12 ? 'good morning' : H<17 ? 'good afternoon' : H<21 ? 'good dusk' : 'good night';
+document.getElementById('greet').textContent = greet;
+document.getElementById('today-line').textContent =
+  now.toLocaleDateString('en-US',{timeZone:'America/Los_Angeles',weekday:'long',month:'long',day:'numeric'}).toLowerCase();
 
-function getToday(){
-  const now=new Date();
-  const parts=now.toLocaleDateString('en-CA',{timeZone:'America/Los_Angeles'}).split('-');
-  const h=parseInt(now.toLocaleTimeString('en-US',{timeZone:'America/Los_Angeles',hour12:false,hour:'numeric'}));
-  let y=parseInt(parts[0]),m=parseInt(parts[1]),d=parseInt(parts[2]);
-  if(h<3){d--;if(d<1){m--;if(m<1){m=12;y--;}d=new Date(y,m,0).getDate();}}
-  return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-}
-const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-function fmtDate(iso){
-  const d=new Date(iso+'T12:00:00');
-  return DAYS[d.getDay()]+', '+d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-}
-
+/* ---------- sync / backfill plumbing (behavior unchanged) ---------- */
 function showLastSync(ts){
   const el=document.getElementById('last-sync');
   if(!ts){el.textContent='';return;}
-  const d=new Date(ts);
-  const now=new Date();
-  const diffMin=Math.round((now-d)/60000);
-  let ago;
-  if(diffMin<1) ago='just now';
-  else if(diffMin<60) ago=diffMin+'m ago';
-  else if(diffMin<1440) ago=Math.floor(diffMin/60)+'h ago';
-  else ago=Math.floor(diffMin/1440)+'d ago';
-  el.textContent='Synced '+ago;
+  const m=Math.round((new Date()-new Date(ts))/60000);
+  el.textContent='synced '+(m<1?'just now':m<60?m+'m ago':m<1440?Math.floor(m/60)+'h ago':Math.floor(m/1440)+'d ago');
 }
-
 function showSyncError(msg){
   const el=document.getElementById('sync-error');
   if(!msg){el.style.display='none';el.textContent='';return;}
-  el.textContent='Sync failed: '+msg;
-  el.style.display='block';
+  el.textContent='sync failed: '+msg; el.style.display='block';
 }
-
 async function doSync(){
-  const b=document.querySelector('.btn-primary');b.textContent='Syncing...';b.disabled=true;
+  const b=document.getElementById('sync-btn'); b.textContent='syncing…'; b.disabled=true;
   try{
     const r=await fetch('/sync',{method:'POST'});
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok||data.status==='error'){
-      showSyncError(data.detail||('HTTP '+r.status));
-      b.textContent='Sync Now';b.disabled=false;
-      return;
-    }
-    showSyncError(null);
-    if(data.last_sync) showLastSync(data.last_sync);
-    b.textContent='Sync Now';b.disabled=false;
-    location.reload();
-  }catch(e){
-    showSyncError('Could not reach the server. '+e);
-    b.textContent='Sync Now';b.disabled=false;
-  }
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.status==='error'){showSyncError(d.detail||('HTTP '+r.status));}
+    else{showSyncError(null); if(d.last_sync)showLastSync(d.last_sync); location.reload(); return;}
+  }catch(e){showSyncError('could not reach the server. '+e);}
+  b.textContent='sync now'; b.disabled=false;
 }
-
 fetch('/api/status').then(r=>r.json()).then(d=>{
   if(d.last_sync)showLastSync(d.last_sync);
   showSyncError(d.last_error);
 }).catch(()=>{});
-
 let backfillPoll=null;
 function renderBackfill(d){
-  const el=document.getElementById('backfill-status');
-  const btn=document.getElementById('backfill-btn');
+  const el=document.getElementById('backfill-status'), btn=document.getElementById('backfill-btn');
   if(d.state==='running'){
-    el.textContent='Backfilling… '+Math.round((d.progress||0)*100)+'%';
-    btn.disabled=true;btn.textContent='Backfilling…';
-    return true;
+    el.textContent='backfilling… '+Math.round((d.progress||0)*100)+'%';
+    btn.disabled=true; btn.textContent='backfilling…'; return true;
   }
-  btn.disabled=false;btn.textContent='Backfill full history';
-  if(d.state==='done'){el.textContent='Backfill complete';}
-  else if(d.state==='error'){el.textContent='Backfill failed';}
-  else{el.textContent='';}
+  btn.disabled=false; btn.textContent='backfill history';
+  el.textContent = d.state==='done' ? 'backfill complete' : d.state==='error' ? 'backfill failed' : '';
   return false;
 }
 function pollBackfill(){
   fetch('/api/backfill-status').then(r=>r.json()).then(d=>{
     const running=renderBackfill(d);
     if(running&&!backfillPoll){backfillPoll=setInterval(pollBackfill,3000);}
-    else if(!running&&backfillPoll){clearInterval(backfillPoll);backfillPoll=null;}
+    else if(!running&&backfillPoll){clearInterval(backfillPoll);backfillPoll=null;location.reload();}
   }).catch(()=>{});
 }
 async function doBackfill(){
-  if(!confirm('Pull your entire Oura history? This runs in the background and may take a while.'))return;
-  await fetch('/backfill',{method:'POST'});
-  pollBackfill();
+  if(!confirm('Pull your entire Oura history? Runs in the background.'))return;
+  await fetch('/backfill',{method:'POST'}); pollBackfill();
 }
 pollBackfill();
 
-function contribBar(label,val,color){
-  if(val==null)return'';
-  return `<div class="contrib-item"><div class="contrib-head"><span>${label}</span><span>${Math.round(val)}</span></div><div class="contrib-bar"><div class="contrib-fill" style="width:${val}%;background:${color}"></div></div></div>`;
+/* ---------- metric metadata ---------- */
+/* kind: score | seconds | count | bpm | ms | pct | temp | plain */
+const META = {
+  sleep_score:            ['sleep score','score','sleep'],
+  total_sleep_duration:   ['total sleep','seconds','sleep'],
+  deep_sleep_duration:    ['deep sleep','seconds','sleep'],
+  rem_sleep_duration:     ['rem sleep','seconds','sleep'],
+  light_sleep_duration:   ['light sleep','seconds','sleep'],
+  average_hrv:            ['sleeping hrv','ms','sleep'],
+  average_heart_rate:     ['sleeping hr','bpm','sleep'],
+  lowest_heart_rate:      ['lowest hr','bpm','sleep'],
+  efficiency:             ['sleep efficiency','pct','sleep'],
+  latency:                ['sleep latency','seconds','sleep'],
+  readiness_score:        ['readiness','score','recovery'],
+  temperature_deviation:  ['temp deviation','temp','recovery'],
+  daily_resilience_sleep_recovery:    ['resilience · sleep recovery','score','recovery'],
+  daily_resilience_daytime_recovery:  ['resilience · daytime','score','recovery'],
+  daily_resilience_stress:            ['resilience · stress','score','recovery'],
+  stress_high_seconds:            ['stress high time','seconds','stress'],
+  stress_recovery_high_seconds:   ['recovery high time','seconds','stress'],
+  spo2_average:                   ['spo2 average','pct','breath'],
+  breathing_disturbance_index:    ['breathing disturbance index','plain','breath'],
+  activity_score:                 ['activity score','score','activity'],
+  activity_steps:                 ['steps','count','activity'],
+  activity_active_calories:       ['active calories','count','activity'],
+  activity_total_calories:        ['total calories','count','activity'],
+  activity_equivalent_walking_distance: ['walking equivalent','meters','activity'],
+  activity_high_time:             ['high activity time','seconds','activity'],
+  activity_medium_time:           ['medium activity time','seconds','activity'],
+  activity_low_time:              ['low activity time','seconds','activity'],
+  activity_sedentary_time:        ['sedentary time','seconds','activity'],
+  activity_average_met_minutes:   ['avg met minutes','plain','activity'],
+  cardiovascular_age:             ['cardiovascular age','plain','heart'],
+  vo2_max:                        ['vo2 max','plain','heart'],
+};
+const SECTIONS = ['sleep','recovery','stress','breath','activity','heart','more'];
+function metaFor(k){
+  if(META[k]) return META[k];
+  let kind='plain', sec='more';
+  if(/duration|_time|seconds|latency/.test(k)) kind='seconds';
+  else if(/score/.test(k)) kind='score';
+  else if(/steps|calories|count/.test(k)) kind='count';
+  if(/^sleep_score_/.test(k)) sec='sleep';
+  else if(/^readiness_/.test(k)) sec='recovery';
+  else if(/^daily_stress|^stress/.test(k)) sec='stress';
+  else if(/^activity_/.test(k)) sec='activity';
+  else if(/^daily_resilience/.test(k)) sec='recovery';
+  return [k.replace(/_/g,' '), kind, sec];
 }
-
-// Helpers for new service API format: scalar metrics are {value, ...} objects
-function sv(obj){return obj?obj.value:null;}
-function durMin(obj){return obj?obj.value:0;} // Duration scalars are in minutes
-
-async function loadDashboard(){
-  const today=getToday();
-  // History needs only scalar fields, so skip the per-night sample series here;
-  // the last-night charts fetch their series separately below.
-  const [sessions,readinessTsResp,sleepScoreTsResp,tempDevResp,tempTrendResp]=await Promise.all([
-    fetchJSON('/api/v1/sleep-sessions?limit=60&include_series=false'),
-    fetchJSON('/api/v1/time-series?metric=readiness_score'),
-    fetchJSON('/api/v1/time-series?metric=sleep_score'),
-    fetchJSON(`/api/v1/time-series?metric=temperature_deviation&start=${today}&end=${today}`),
-    fetchJSON(`/api/v1/time-series?metric=temperature_trend_deviation&start=${today}&end=${today}`),
-  ]);
-
-  // Also fetch readiness contributors for today
-  const readinessContribMetrics=['readiness_activity_balance','readiness_body_temperature','readiness_hrv_balance',
-    'readiness_previous_day_activity','readiness_previous_night','readiness_recovery_index',
-    'readiness_resting_heart_rate','readiness_sleep_balance','readiness_sleep_regularity'];
-  const sleepScoreContribMetrics=['sleep_score_deep_sleep','sleep_score_efficiency','sleep_score_latency',
-    'sleep_score_rem_sleep','sleep_score_restfulness','sleep_score_timing','sleep_score_total_sleep'];
-
-  const allSess=sessions.data.slice().reverse();
-  // Filter out junk micro-sessions (< 30 min = 0.5 in minutes)
-  const sess=allSess.filter(s=>durMin(s.total_duration)>=30);
-
-  // Find last real sleep session
-  const lastReal=sessions.data.find(s=>durMin(s.total_duration)>=30);
-  let lastNightDay=null;
-  if(lastReal){
-    const end=new Date(lastReal.end);
-    const ep=end.toLocaleDateString('en-CA',{timeZone:'America/Los_Angeles'}).split('-');
-    const eh=parseInt(end.toLocaleTimeString('en-US',{timeZone:'America/Los_Angeles',hour12:false,hour:'numeric'}));
-    let ey=parseInt(ep[0]),em=parseInt(ep[1]),ed=parseInt(ep[2]);
-    if(eh<3){ed--;if(ed<1){em--;if(em<1){em=12;ey--;}ed=new Date(ey,em,0).getDate();}}
-    lastNightDay=ey+'-'+String(em).padStart(2,'0')+'-'+String(ed).padStart(2,'0');
-  }
-
-  // Build daily lookups from time-series responses
-  const readinessMap={},sleepScoreMap={},tempDevMap={},tempTrendMap={};
-  (readinessTsResp.samples||[]).forEach(s=>{readinessMap[s.timestamp.slice(0,10)]=s.value;});
-  (sleepScoreTsResp.samples||[]).forEach(s=>{sleepScoreMap[s.timestamp.slice(0,10)]=s.value;});
-  (tempDevResp.samples||[]).forEach(s=>{tempDevMap[s.timestamp.slice(0,10)]=s.value;});
-  (tempTrendResp.samples||[]).forEach(s=>{tempTrendMap[s.timestamp.slice(0,10)]=s.value;});
-
-  // Fetch readiness contributors for today (single day only)
-  const todayContribs={};
-  if(readinessMap[today]!=null){
-    const contribResults=await Promise.all(readinessContribMetrics.map(m=>fetchJSON(`/api/v1/time-series?metric=${m}&start=${today}&end=${today}`)));
-    readinessContribMetrics.forEach((m,i)=>{
-      const sample=(contribResults[i].samples||[])[0];
-      if(sample) todayContribs[m]=sample.value;
-    });
-  }
-
-  // Fetch sleep score contributors for last night (single day only)
-  const sleepContribs={};
-  if(lastNightDay && sleepScoreMap[lastNightDay]!=null){
-    const contribResults=await Promise.all(sleepScoreContribMetrics.map(m=>fetchJSON(`/api/v1/time-series?metric=${m}&start=${lastNightDay}&end=${lastNightDay}`)));
-    sleepScoreContribMetrics.forEach((m,i)=>{
-      const sample=(contribResults[i].samples||[])[0];
-      if(sample) sleepContribs[m]=sample.value;
-    });
-  }
-
-  let html='';
-
-  // ---- LAST NIGHT\'S SLEEP ----
-  html+='<section id="last-night">';
-  const isToday=lastReal && lastNightDay===today;
-  if(lastReal && isToday){
-    html+=`<div class="section-title">Last Night\'s Sleep <span class="date">${fmtDate(lastNightDay)}</span></div>`;
-    const sleepScore=sv(lastReal.sleep_score)||sleepScoreMap[lastNightDay];
-
-    html+='<div class="grid">';
-
-    // Sleep stats card
-    html+='<div class="card"><h3>Sleep Summary</h3>';
-    if(sleepScore!=null){
-      html+=`<div class="score-row"><div class="score-ring" style="border:3px solid ${scoreColor(sleepScore)}">${Math.round(sleepScore)}</div><div><div style="font-weight:600">Sleep Score</div><div class="score-label">Total: ${toHM(durMin(lastReal.total_duration)*60)}</div></div></div>`;
-    }
-    html+='<div class="metrics">';
-    const stats=[
-      ['Total Sleep',toHM(durMin(lastReal.total_duration)*60)],
-      ['Deep',toHM(durMin(lastReal.deep_sleep_duration)*60)],
-      ['REM',toHM(durMin(lastReal.rem_sleep_duration)*60)],
-      ['Light',toHM(durMin(lastReal.light_sleep_duration)*60)],
-      ['Awake',toHM(durMin(lastReal.awake_time)*60)],
-      ['Time in Bed',toHM(durMin(lastReal.time_in_bed)*60)],
-      ['Avg HR',sv(lastReal.average_heart_rate)!=null?Math.round(sv(lastReal.average_heart_rate))+' bpm':'--'],
-      ['Lowest HR',sv(lastReal.lowest_heart_rate)!=null?Math.round(sv(lastReal.lowest_heart_rate))+' bpm':'--'],
-      ['Avg HRV',sv(lastReal.average_hrv)!=null?Math.round(sv(lastReal.average_hrv))+' ms':'--'],
-      ['Avg Breath',sv(lastReal.average_breath)!=null?sv(lastReal.average_breath).toFixed(1)+'/min':'--'],
-      ['Efficiency',sv(lastReal.efficiency)!=null?Math.round(sv(lastReal.efficiency))+'%':'--'],
-      ['Latency',lastReal.latency?toHM(durMin(lastReal.latency)*60):'--'],
-    ];
-    stats.forEach(([l,v])=>html+=`<div class="metric"><div class="val">${v}</div><div class="lbl">${l}</div></div>`);
-    html+='</div>';
-
-    // Sleep score contributors
-    const contribs=[['Deep Sleep','sleep_score_deep_sleep'],['REM Sleep','sleep_score_rem_sleep'],
-      ['Total Sleep','sleep_score_total_sleep'],['Efficiency','sleep_score_efficiency'],
-      ['Restfulness','sleep_score_restfulness'],['Latency','sleep_score_latency'],['Timing','sleep_score_timing']];
-    const hasContribs=contribs.some(([,k])=>sleepContribs[k]!=null);
-    if(hasContribs){
-      html+='<h3 style="margin-top:1rem">Score Breakdown</h3>';
-      contribs.forEach(([label,key])=>html+=contribBar(label,sleepContribs[key],C.purple));
-    }
-    html+='</div>';
-
-    // Charts card
-    html+='<div class="card"><h3>Sleep Stages</h3><canvas id="lastStages"></canvas>';
-    html+='<h3 style="margin-top:1rem">Heart Rate</h3><canvas id="lastHr"></canvas>';
-    html+='<h3 style="margin-top:1rem">HRV</h3><canvas id="lastHrv"></canvas>';
-    html+='</div>';
-
-    html+='</div>';
-  } else {
-    html+='<div class="section-title">Last Night\'s Sleep</div><div class="no-data">No data for last night yet. Try syncing your Oura ring in the Oura app, then sync here.</div>';
-  }
-  html+='</section>';
-
-  // ---- TODAY ----
-  html+='<section id="today">';
-  const todayReadiness=readinessMap[today];
-  if(todayReadiness!=null){
-    html+=`<div class="section-title">Today <span class="date">${fmtDate(today)}</span></div>`;
-    html+='<div class="grid">';
-
-    // Readiness card
-    html+='<div class="card"><h3>Readiness</h3>';
-    html+=`<div class="score-row"><div class="score-ring" style="border:3px solid ${scoreColor(todayReadiness)}">${Math.round(todayReadiness)}</div><div style="font-weight:600">Readiness Score</div></div>`;
-    const rContribs=[['Resting HR','readiness_resting_heart_rate'],['HRV Balance','readiness_hrv_balance'],
-      ['Body Temperature','readiness_body_temperature'],['Recovery Index','readiness_recovery_index'],
-      ['Previous Night','readiness_previous_night'],['Sleep Balance','readiness_sleep_balance'],
-      ['Activity Balance','readiness_activity_balance'],['Sleep Regularity','readiness_sleep_regularity']];
-    rContribs.forEach(([label,key])=>html+=contribBar(label,todayContribs[key],C.emerald));
-    html+='</div>';
-
-    // Body signals card
-    html+='<div class="card"><h3>Body Signals</h3><div class="metrics">';
-    const tempDev=tempDevMap[today];
-    const tempTrend=tempTrendMap[today];
-    if(tempDev!=null) html+=`<div class="metric"><div class="val">${tempDev>0?'+':''}${tempDev.toFixed(2)}&deg;</div><div class="lbl">Temp Deviation</div></div>`;
-    if(tempTrend!=null) html+=`<div class="metric"><div class="val">${tempTrend>0?'+':''}${tempTrend.toFixed(2)}&deg;</div><div class="lbl">Temp Trend</div></div>`;
-    html+='</div></div>';
-
-    html+='</div>';
-  } else {
-    html+=`<div class="section-title">Today <span class="date">${fmtDate(today)}</span></div><div class="no-data">No data for today yet. Data usually appears after your first sync of the day.</div>`;
-  }
-  html+='</section>';
-
-  // ---- HISTORY ----
-  html+='<section id="history">';
-  html+='<div class="section-title">History</div>';
-  html+='<div class="grid">';
-  html+='<div class="card"><h3>Sleep Duration</h3><canvas id="sleepDuration"></canvas></div>';
-  html+='<div class="card"><h3>Readiness &amp; Sleep Score</h3><canvas id="scores"></canvas></div>';
-  html+='<div class="card"><h3>Sleeping Heart Rate</h3><canvas id="hrChart"></canvas></div>';
-  html+='<div class="card"><h3>Sleeping HRV</h3><canvas id="hrvChart"></canvas></div>';
-  html+='</div></section>';
-
-  document.getElementById('app').innerHTML=html;
-
-  // ---- RENDER CHARTS ----
-
-  // Last night charts (only rendered when today's sleep data exists)
-  if(isToday){
-    const timeFmt=d=>new Date(d.timestamp).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'});
-
-    // History fetch omits per-night series; fetch the series for the latest night here.
-    const detailResp=await fetchJSON('/api/v1/sleep-sessions?limit=3');
-    const detail=(detailResp.data||[]).find(s=>s.id===lastReal.id)||lastReal;
-
-    const stageData=detail.stages;
-    if(stageData && stageData.samples && stageData.samples.length>0){
-      const sLabels={deep:'Deep',light:'Light',rem:'REM',awake:'Awake'};
-      const sColors={deep:C.indigo,light:C.slate,rem:C.cyan,awake:C.amber};
-      const sNums={deep:1,light:2,rem:3,awake:4};
-      new Chart(document.getElementById('lastStages'),{type:'bar',
-        data:{labels:stageData.samples.map(timeFmt),datasets:[{data:stageData.samples.map(d=>sNums[d.value]||0),backgroundColor:stageData.samples.map(d=>sColors[d.value]||'#64748b'),barPercentage:1,categoryPercentage:1}]},
-        options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false},tooltip:{callbacks:{label:c=>{const rev={1:'Deep',2:'Light',3:'REM',4:'Awake'};return rev[c.raw]||c.raw;}}}},scales:{...chartOpts.scales,y:{...chartOpts.scales.y,min:0.5,max:4.5,ticks:{...chartOpts.scales.y.ticks,callback:v=>{const m={1:'Deep',2:'Light',3:'REM',4:'Awake'};return m[v]||'';}}}}}});
-    }
-
-    const hrData=detail.heart_rate;
-    if(hrData && hrData.samples && hrData.samples.length>0){
-      new Chart(document.getElementById('lastHr'),{type:'line',
-        data:{labels:hrData.samples.map(timeFmt),datasets:[{label:'bpm',data:hrData.samples.map(d=>d.value),borderColor:C.rose,tension:0.3,pointRadius:0,borderWidth:1.5}]},
-        options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false}}}});
-    }
-
-    const hrvData=detail.hrv;
-    if(hrvData && hrvData.samples && hrvData.samples.length>0){
-      new Chart(document.getElementById('lastHrv'),{type:'line',
-        data:{labels:hrvData.samples.map(timeFmt),datasets:[{label:'ms',data:hrvData.samples.map(d=>d.value),borderColor:C.cyan,tension:0.3,pointRadius:0,borderWidth:1.5,fill:true,backgroundColor:'rgba(6,182,212,0.08)'}]},
-        options:{...chartOpts,plugins:{...chartOpts.plugins,legend:{display:false}}}});
-    }
-  }
-
-  // History charts
-  if(sess.length>0){
-    const labels=sess.map(s=>s.start.slice(5,10));
-    new Chart(document.getElementById('sleepDuration'),{type:'bar',
-      data:{labels,datasets:[
-        {label:'Deep',data:sess.map(s=>+(durMin(s.deep_sleep_duration)/60).toFixed(1)),backgroundColor:C.indigo},
-        {label:'REM',data:sess.map(s=>+(durMin(s.rem_sleep_duration)/60).toFixed(1)),backgroundColor:C.cyan},
-        {label:'Light',data:sess.map(s=>+(durMin(s.light_sleep_duration)/60).toFixed(1)),backgroundColor:C.slate},
-      ]},options:{...chartOpts,scales:{...chartOpts.scales,x:{...chartOpts.scales.x,stacked:true},y:{...chartOpts.scales.y,stacked:true}}}});
-
-    new Chart(document.getElementById('hrChart'),{type:'line',
-      data:{labels,datasets:[
-        {label:'Avg',data:sess.map(s=>sv(s.average_heart_rate)),borderColor:C.rose,tension:0.3,pointRadius:2,spanGaps:true},
-        {label:'Low',data:sess.map(s=>sv(s.lowest_heart_rate)),borderColor:C.amber,tension:0.3,pointRadius:2,spanGaps:true},
-      ]},options:chartOpts});
-
-    new Chart(document.getElementById('hrvChart'),{type:'line',
-      data:{labels,datasets:[
-        {label:'Avg HRV',data:sess.map(s=>sv(s.average_hrv)),borderColor:C.cyan,tension:0.3,pointRadius:2,spanGaps:true,fill:true,backgroundColor:'rgba(6,182,212,0.08)'},
-      ]},options:chartOpts});
-  }
-
-  // Scores chart
-  const allDates=[...new Set([...Object.keys(readinessMap),...Object.keys(sleepScoreMap)])].sort();
-  if(allDates.length>0){
-    new Chart(document.getElementById('scores'),{type:'line',
-      data:{labels:allDates.map(d=>d.slice(5)),datasets:[
-        {label:'Readiness',data:allDates.map(d=>readinessMap[d]??null),borderColor:C.emerald,tension:0.3,pointRadius:2,spanGaps:true},
-        {label:'Sleep',data:allDates.map(d=>sleepScoreMap[d]??null),borderColor:C.purple,tension:0.3,pointRadius:2,spanGaps:true},
-      ]},options:{...chartOpts,scales:{...chartOpts.scales,y:{...chartOpts.scales.y,min:50,max:100}}}});
+function fmt(v,kind){
+  if(v==null) return ['–',''];
+  switch(kind){
+    case 'seconds': { const h=Math.floor(v/3600), m=Math.round((v%3600)/60);
+                      return h>0?[h+'h '+String(m).padStart(2,'0'),'m']:[m,'min']; }
+    case 'pct':     return [(Math.round(v*10)/10),'%'];
+    case 'ms':      return [Math.round(v),'ms'];
+    case 'bpm':     return [Math.round(v),'bpm'];
+    case 'temp':    return [(v>0?'+':'')+ (Math.round(v*100)/100),'°c'];
+    case 'count':   return [Math.round(v).toLocaleString(),''];
+    case 'score':   return [Math.round(v),''];
+    case 'meters':  return [(v/1000).toFixed(1),'km'];
+    default:        return [Math.round(v*10)/10,''];
   }
 }
+function spark(series){
+  if(series.length<2) return '';
+  const w=180,h=34,vals=series.map(p=>p[1]);
+  const mn=Math.min(...vals), mx=Math.max(...vals), span=(mx-mn)||1;
+  const pts=series.map((p,i)=>[(i/(series.length-1))*(w-4)+2, h-3-((p[1]-mn)/span)*(h-8)]);
+  const d='M'+pts.map(p=>p[0].toFixed(1)+' '+p[1].toFixed(1)).join('L');
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="45-day trend"><line x1="2" y1="${h-3}" x2="${w-2}" y2="${h-3}"/><path d="${d}"><title>last ${series.length} days · min ${Math.round(mn*10)/10} · max ${Math.round(mx*10)/10}</title></path></svg>`;
+}
+function tile(key, series){
+  const [name,kind]=metaFor(key);
+  const latest=series[series.length-1], prev=series[series.length-2];
+  const [val,unit]=fmt(latest?latest[1]:null, kind);
+  let delta='';
+  if(latest&&prev&&prev[1]){
+    const diff=latest[1]-prev[1];
+    const cls=diff>=0?'up':'down', sign=diff>=0?'+':'−';
+    const [dv,du]=fmt(Math.abs(diff),kind);
+    delta=`<span class="${cls}">${sign}${dv}${du}</span> vs prev · ${latest[0].slice(5)}`;
+  } else if(latest){ delta=latest[0]; }
+  return `<div class="tile"><div class="name">${name}</div>`+
+         `<div class="value">${val}<span class="unit">${unit}</span></div>`+
+         `<div class="delta">${delta}</div>${spark(series)}</div>`;
+}
 
-loadDashboard();
+/* ---------- render ---------- */
+fetch('/api/overview').then(r=>r.json()).then(d=>{
+  const metrics=d.metrics||{};
+  const keys=Object.keys(metrics);
+  const app=document.getElementById('app');
+  if(!keys.length){
+    app.innerHTML='<div class="empty" style="margin-top:2rem">no data yet — the first sync or the backfill will fill this page. every collection the ring reports gets a tile.</div>';
+    return;
+  }
+  const days=new Set(); keys.forEach(k=>metrics[k].forEach(p=>days.add(p[0])));
+  document.getElementById('substat').textContent = keys.length+' metrics · '+days.size+' days shown · 45-day window';
+  const bySec={};
+  keys.sort().forEach(k=>{ const sec=metaFor(k)[2]; (bySec[sec]=bySec[sec]||[]).push(k); });
+  app.innerHTML = SECTIONS.filter(s=>bySec[s]).map(s=>
+    `<div class="section"><div class="label">${s}</div><div class="grid">`+
+    bySec[s].map(k=>tile(k,metrics[k])).join('')+`</div></div>`).join('');
+}).catch(e=>{
+  document.getElementById('app').innerHTML='<div class="empty">failed to load overview: '+e+'</div>';
+});
+
+/* blinking cursor, sieve-style */
+setInterval(()=>{const c=document.getElementById('cursor');c.style.visibility=c.style.visibility==='hidden'?'visible':'hidden';},600);
 </script>
 </body>
 </html>

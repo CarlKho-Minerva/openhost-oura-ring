@@ -35,6 +35,36 @@ def _redirect_uri() -> str:
 # Pages
 # ---------------------------------------------------------------------------
 
+@get("/api/overview")
+async def overview() -> dict:
+    """Every metric the sync has ever stored: latest value + 45-day series.
+
+    Tile source for the dashboard -- keys are discovered from the DB, so a new
+    collection added to the sync shows up here (and on the page) with no
+    frontend change.
+    """
+    out: dict = {}
+    async with db.connect() as conn:
+        cur = await conn.execute(
+            """SELECT metric, date, value FROM daily_metrics
+               WHERE date >= date('now', '-45 days') ORDER BY metric, date"""
+        )
+        for row in await cur.fetchall():
+            out.setdefault(row["metric"], []).append([row["date"], row["value"]])
+        # Per-night sleep-session metrics (durations, efficiency, HR/HRV avgs),
+        # keyed by the session's end date so they line up with daily metrics.
+        cur = await conn.execute(
+            """SELECT substr(s.end_ts, 1, 10) AS day, m.metric, AVG(m.value) AS value
+               FROM sleep_session_metrics m
+               JOIN sleep_sessions s ON s.id = m.sleep_session_id
+               WHERE s.end_ts >= date('now', '-45 days')
+               GROUP BY day, m.metric ORDER BY m.metric, day"""
+        )
+        for row in await cur.fetchall():
+            out.setdefault(row["metric"], []).append([row["day"], row["value"]])
+    return {"metrics": out}
+
+
 @get("/api/lastsync")
 async def last_sync_public() -> dict:
     """Public dead-man's-switch endpoint: sync freshness only, no health data.
@@ -270,7 +300,7 @@ DASHBOARD_HTML = (_TEMPLATES / "dashboard.html").read_text()
 
 app = Litestar(
     route_handlers=[
-        last_sync_public,
+        last_sync_public, overview,
         health_check, index, setup_page, start_oauth,
         oauth_callback, get_status, trigger_sync, reset_data,
         trigger_backfill, backfill_status,
