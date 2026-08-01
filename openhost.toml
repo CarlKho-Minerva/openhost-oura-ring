@@ -9,6 +9,7 @@ port = 8080
 
 [routing]
 health_check = "/health"
+public_paths = ["/api/lastsync"]
 
 [resources]
 memory_mb = 256

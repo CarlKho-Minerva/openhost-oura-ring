@@ -35,6 +35,16 @@ def _redirect_uri() -> str:
 # Pages
 # ---------------------------------------------------------------------------
 
+@get("/api/lastsync")
+async def last_sync_public() -> dict:
+    """Public dead-man's-switch endpoint: sync freshness only, no health data.
+
+    Deliberately unauthenticated and PII-free so an external watchdog can page
+    when the sync dies silently. Mirrors apple-health's /api/lastsync.
+    """
+    return {"last_sync": await db.get_config("last_sync")}
+
+
 @get("/health")
 async def health_check() -> dict:
     return {"status": "ok"}
@@ -260,6 +270,7 @@ DASHBOARD_HTML = (_TEMPLATES / "dashboard.html").read_text()
 
 app = Litestar(
     route_handlers=[
+        last_sync_public,
         health_check, index, setup_page, start_oauth,
         oauth_callback, get_status, trigger_sync, reset_data,
         trigger_backfill, backfill_status,
