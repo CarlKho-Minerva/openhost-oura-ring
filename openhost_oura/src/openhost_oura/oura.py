@@ -17,7 +17,7 @@ def _to_utc(ts: str) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 OURA_AUTH_URL = "https://cloud.ouraring.com/oauth/authorize"
 OURA_TOKEN_URL = "https://api.ouraring.com/oauth/token"
-OURA_SCOPES = "daily heartrate personal session"
+OURA_SCOPES = "daily heartrate personal session spo2"
 
 
 def get_authorize_url(client_id: str, redirect_uri: str, state: str) -> str:
@@ -172,11 +172,12 @@ def error_message(exc: Exception) -> str:
 
 
 async def _sync_window(client, headers, start_date: str, end_date: str):
-    """Sync all four collections for a [start_date, end_date] window (YYYY-MM-DD)."""
+    """Sync all five collections for a [start_date, end_date] window (YYYY-MM-DD)."""
     await _sync_sleep(client, headers, start_date, end_date)
     await _sync_heartrate_range(client, headers, start_date, end_date)
     await _sync_daily_readiness(client, headers, start_date, end_date)
     await _sync_daily_sleep(client, headers, start_date, end_date)
+    await _sync_daily_spo2(client, headers, start_date, end_date)
 
 
 # The heartrate endpoint rejects ranges longer than 30 days; daily endpoints don't.
@@ -513,3 +514,50 @@ async def _sync_daily_sleep(client, headers, start_date, end_date):
                     metrics,
                 )
         await conn.commit()
+
+async def _sync_daily_spo2(client, headers, start_date, end_date):
+    """Nightly average SpO2 and breathing disturbance index.
+
+    These two are the OSA-relevant signals the ring produces; requires the
+    `spo2` scope, so tokens authorized before that scope was added return 403
+    for this collection only -- treat that as "not granted" and skip, rather
+    than failing the whole sync window.
+    """
+    try:
+        records = await _fetch_paginated(
+            client,
+            f"{OURA_API}/usercollection/daily_spo2",
+            headers,
+            {"start_date": start_date, "end_date": end_date},
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 403:
+            log.warning("daily_spo2 returned 403 - token lacks the spo2 scope; skipping")
+            return
+        raise
+    log.info("Fetched %d daily_spo2 records", len(records))
+
+    async with db.connect() as conn:
+        for rec in records:
+            day = rec.get("day")
+            if not day:
+                continue
+
+            metrics = []
+            pct = rec.get("spo2_percentage") or {}
+            avg = pct.get("average")
+            if avg is not None:
+                metrics.append(("oura", day, "spo2_average", float(avg)))
+
+            bdi = rec.get("breathing_disturbance_index")
+            if bdi is not None:
+                metrics.append(("oura", day, "breathing_disturbance_index", float(bdi)))
+
+            if metrics:
+                await conn.executemany(
+                    """INSERT OR REPLACE INTO daily_metrics (source, date, metric, value)
+                       VALUES (?, ?, ?, ?)""",
+                    metrics,
+                )
+        await conn.commit()
+
