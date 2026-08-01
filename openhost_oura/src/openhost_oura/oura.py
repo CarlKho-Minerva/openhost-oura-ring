@@ -17,7 +17,7 @@ def _to_utc(ts: str) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 OURA_AUTH_URL = "https://cloud.ouraring.com/oauth/authorize"
 OURA_TOKEN_URL = "https://api.ouraring.com/oauth/token"
-OURA_SCOPES = "daily heartrate personal session spo2"
+OURA_SCOPES = "daily heartrate personal session spo2 workout"
 
 
 def get_authorize_url(client_id: str, redirect_uri: str, state: str) -> str:
@@ -178,6 +178,7 @@ async def _sync_window(client, headers, start_date: str, end_date: str):
     await _sync_daily_readiness(client, headers, start_date, end_date)
     await _sync_daily_sleep(client, headers, start_date, end_date)
     await _sync_daily_spo2(client, headers, start_date, end_date)
+    await _sync_daily_generic(client, headers, start_date, end_date)
 
 
 # The heartrate endpoint rejects ranges longer than 30 days; daily endpoints don't.
@@ -560,4 +561,80 @@ async def _sync_daily_spo2(client, headers, start_date, end_date):
                     metrics,
                 )
         await conn.commit()
+
+# Every remaining numeric daily collection, one table-driven sync. Each entry:
+# (collection, scope-ish note, field extractors). Extractors map a record to
+# (metric_name, value) pairs; contributors dicts are flattened with a prefix.
+# A 403 means the token predates the scope -- skip that collection, never fail
+# the window (same contract as _sync_daily_spo2).
+_DAILY_GENERIC = [
+    ("daily_activity", [
+        ("score", "activity_score"),
+        ("steps", "activity_steps"),
+        ("active_calories", "activity_active_calories"),
+        ("total_calories", "activity_total_calories"),
+        ("target_calories", "activity_target_calories"),
+        ("equivalent_walking_distance", "activity_equivalent_walking_distance"),
+        ("high_activity_time", "activity_high_time"),
+        ("medium_activity_time", "activity_medium_time"),
+        ("low_activity_time", "activity_low_time"),
+        ("sedentary_time", "activity_sedentary_time"),
+        ("non_wear_time", "activity_non_wear_time"),
+        ("resting_time", "activity_resting_time"),
+        ("inactivity_alerts", "activity_inactivity_alerts"),
+        ("average_met_minutes", "activity_average_met_minutes"),
+    ]),
+    ("daily_stress", [
+        ("stress_high", "stress_high_seconds"),
+        ("recovery_high", "stress_recovery_high_seconds"),
+    ]),
+    ("daily_resilience", []),          # numeric payload is all in contributors
+    ("daily_cardiovascular_age", [
+        ("vascular_age", "cardiovascular_age"),
+    ]),
+    ("vO2_max", [
+        ("vo2_max", "vo2_max"),
+    ]),
+]
+
+
+async def _sync_daily_generic(client, headers, start_date, end_date):
+    for collection, fields in _DAILY_GENERIC:
+        try:
+            records = await _fetch_paginated(
+                client,
+                f"{OURA_API}/usercollection/{collection}",
+                headers,
+                {"start_date": start_date, "end_date": end_date},
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (403, 404):
+                log.warning("%s returned %d - not granted/available; skipping",
+                            collection, e.response.status_code)
+                continue
+            raise
+        log.info("Fetched %d %s records", len(records), collection)
+
+        async with db.connect() as conn:
+            for rec in records:
+                day = rec.get("day")
+                if not day:
+                    continue
+                metrics = []
+                for src_key, metric_name in fields:
+                    val = rec.get(src_key)
+                    if isinstance(val, (int, float)):
+                        metrics.append(("oura", day, metric_name, float(val)))
+                contributors = rec.get("contributors") or {}
+                for key, val in contributors.items():
+                    if isinstance(val, (int, float)):
+                        metrics.append(("oura", day, f"{collection}_{key}", float(val)))
+                if metrics:
+                    await conn.executemany(
+                        """INSERT OR REPLACE INTO daily_metrics (source, date, metric, value)
+                           VALUES (?, ?, ?, ?)""",
+                        metrics,
+                    )
+            await conn.commit()
+
 
