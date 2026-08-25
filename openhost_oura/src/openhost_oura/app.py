@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from html import escape as html_escape
 from pathlib import Path
 
+import httpx
 from litestar import Litestar, Request, get, post
 from litestar.response import Redirect, Response
 from litestar.exceptions import NotFoundException
@@ -109,6 +110,41 @@ async def setup_page() -> Response:
         .replace("{{error_banner}}", error_banner)
     )
     return Response(content=html, media_type="text/html")
+
+
+@post("/setup/pat")
+async def set_personal_token(request: Request) -> Response:
+    body = await request.body()
+    params = dict(p.split("=", 1) for p in body.decode().split("&") if "=" in p)
+    token = _url_decode(params.get("personal_token", "")).strip()
+    if not token:
+        return Response(content="personal_token required", status_code=400)
+
+    # Validate before storing: a mistyped token must fail here, on the form,
+    # not later as a pipeline that never syncs.
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"{oura.OURA_API}/usercollection/personal_info",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code in (401, 403):
+        return Response(
+            content=f"Oura rejected that token ({resp.status_code}). "
+            "Check it at cloud.ouraring.com/personal-access-tokens and try again.",
+            status_code=400,
+        )
+    resp.raise_for_status()
+
+    await db.set_config("oura_access_token", token)
+    # A PAT has no refresh path; clear OAuth remnants so a dead token family
+    # can't shadow it. When the PAT is revoked, the 401 -> refresh -> None
+    # chain fails the sync and last_sync goes stale, which the external
+    # watchdog pages on within 36h.
+    await db.delete_config("oura_refresh_token")
+    await db.set_config("last_sync_error", "")
+
+    asyncio.create_task(_background_sync())
+    return Redirect("/")
 
 
 @post("/setup/oauth")
@@ -301,7 +337,7 @@ DASHBOARD_HTML = (_TEMPLATES / "dashboard.html").read_text()
 app = Litestar(
     route_handlers=[
         last_sync_public, overview,
-        health_check, index, setup_page, start_oauth,
+        health_check, index, setup_page, set_personal_token, start_oauth,
         oauth_callback, get_status, trigger_sync, reset_data,
         trigger_backfill, backfill_status,
         *service_routes,
