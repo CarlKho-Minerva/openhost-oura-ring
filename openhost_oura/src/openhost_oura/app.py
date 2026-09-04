@@ -92,6 +92,7 @@ async def index() -> Response:
 @get("/setup")
 async def setup_page() -> Response:
     client_id = await db.get_config("oura_client_id") or ""
+    client_secret = await db.get_config("oura_client_secret")
     token = await db.get_config("oura_access_token")
     last_sync = await db.get_config("last_sync") or "never"
     last_error = await db.get_config("last_sync_error")
@@ -105,6 +106,10 @@ async def setup_page() -> Response:
         )
     html = (
         SETUP_HTML.replace("{{client_id}}", client_id)
+        .replace(
+            "{{client_secret_placeholder}}",
+            "Saved — leave blank to reuse" if client_secret else "Your client secret",
+        )
         .replace("{{status}}", status)
         .replace("{{last_sync}}", last_sync)
         .replace("{{error_banner}}", error_banner)
@@ -153,6 +158,10 @@ async def start_oauth(request: Request) -> Response:
     params = dict(p.split("=", 1) for p in body.decode().split("&") if "=" in p)
     client_id = _url_decode(params.get("client_id", "")).strip()
     client_secret = _url_decode(params.get("client_secret", "")).strip()
+    if not client_id:
+        client_id = await db.get_config("oura_client_id") or ""
+    if not client_secret:
+        client_secret = await db.get_config("oura_client_secret") or ""
     if not client_id or not client_secret:
         return Response(content="client_id and client_secret required", status_code=400)
 
