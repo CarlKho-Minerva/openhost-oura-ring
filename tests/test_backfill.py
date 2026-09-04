@@ -1,4 +1,5 @@
 import asyncio
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -28,6 +29,15 @@ class FakeClient:
     async def get(self, url, headers=None, params=None):
         self.calls.append(dict(params or {}))
         return self._responses.pop(0)
+
+
+def test_authorize_url_omits_scope_to_request_all_enabled_data_types():
+    url = oura.get_authorize_url("client", "https://example.test/callback", "state")
+    query = parse_qs(urlparse(url).query)
+
+    assert query["response_type"] == ["code"]
+    assert query["client_id"] == ["client"]
+    assert "scope" not in query
 
 
 def test_fetch_paginated_retries_on_429(monkeypatch):
@@ -71,8 +81,9 @@ def test_fetch_paginated_exponential_fallback(monkeypatch):
 def test_get_with_retry_refreshes_on_401(monkeypatch):
     refreshed = []
 
-    async def fake_refresh():
+    async def fake_refresh(rejected_token=None):
         refreshed.append(True)
+        assert rejected_token == "oldtok"
         return "newtok"
 
     monkeypatch.setattr(oura, "refresh_access_token", fake_refresh)
@@ -87,7 +98,7 @@ def test_get_with_retry_refreshes_on_401(monkeypatch):
 
 
 def test_get_with_retry_raises_when_refresh_fails(monkeypatch):
-    async def fake_refresh():
+    async def fake_refresh(rejected_token=None):
         return None
 
     monkeypatch.setattr(oura, "refresh_access_token", fake_refresh)
@@ -100,6 +111,41 @@ def test_get_with_retry_raises_when_refresh_fails(monkeypatch):
 def test_error_message_maps_401_to_reconnect():
     exc = httpx.HTTPStatusError("e", request=None, response=FakeResp(401))
     assert "reconnect" in oura.error_message(exc).lower()
+
+
+def test_refresh_reuses_token_rotated_by_another_request(monkeypatch, tmp_path):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "t.db"))
+    refreshes = []
+
+    async def fake_do_refresh():
+        refreshes.append(True)
+        return "should-not-be-used"
+
+    monkeypatch.setattr(oura, "_do_refresh", fake_do_refresh)
+
+    async def run():
+        await db.init_db()
+        await db.set_config("oura_access_token", "token-b")
+        return await oura.refresh_access_token("token-a")
+
+    assert asyncio.run(run()) == "token-b"
+    assert refreshes == []
+
+
+def test_refresh_rotates_when_current_token_was_rejected(monkeypatch, tmp_path):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "t.db"))
+
+    async def fake_do_refresh():
+        return "token-b"
+
+    monkeypatch.setattr(oura, "_do_refresh", fake_do_refresh)
+
+    async def run():
+        await db.init_db()
+        await db.set_config("oura_access_token", "token-a")
+        return await oura.refresh_access_token("token-a")
+
+    assert asyncio.run(run()) == "token-b"
 
 
 def test_sync_all_clears_last_sync_error(monkeypatch, tmp_path):

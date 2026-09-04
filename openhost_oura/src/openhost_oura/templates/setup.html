@@ -36,23 +36,27 @@
   <p class="status">Status: {{status}} &middot; Last sync: {{last_sync}}</p>
   {{error_banner}}
 
-  <h2>Personal Access Token</h2>
-  <form method="POST" action="/setup/pat">
-    <label>Token (from cloud.ouraring.com &rarr; Personal Access Tokens)</label>
-    <input type="password" name="personal_token" placeholder="Your personal access token">
-    <button type="submit">Save token &amp; sync</button>
-  </form>
-
-  <hr class="divider">
-
-  <h2>Or connect with OAuth</h2>
+  <h2>Connect with OAuth</h2>
+  <p class="status">Supported connection. This requests every data scope enabled for your Oura application and keeps access current with rotating refresh tokens.</p>
   <form method="POST" action="/setup/oauth">
     <label>Client ID</label>
     <input type="text" name="client_id" value="{{client_id}}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
     <label>Client Secret</label>
     <input type="password" name="client_secret" placeholder="Your client secret">
-    <button type="submit" class="alt-btn">Connect to Oura</button>
+    <button type="submit">Connect to Oura</button>
   </form>
+
+  <hr class="divider">
+
+  <details>
+    <summary>Legacy Personal Access Token</summary>
+    <p class="status">Oura deprecated Personal Access Tokens in December 2025. Use this only for a previously issued token.</p>
+    <form method="POST" action="/setup/pat">
+      <label>Existing legacy token</label>
+      <input type="password" name="personal_token" placeholder="Previously issued token">
+      <button type="submit" class="alt-btn">Use legacy token</button>
+    </form>
+  </details>
 </div>
 </body>
 </html>
