@@ -17,15 +17,17 @@ def _to_utc(ts: str) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 OURA_AUTH_URL = "https://cloud.ouraring.com/oauth/authorize"
 OURA_TOKEN_URL = "https://api.ouraring.com/oauth/token"
-OURA_SCOPES = "daily heartrate personal session spo2 workout"
-
-
 def get_authorize_url(client_id: str, redirect_uri: str, state: str) -> str:
+    """Request every scope enabled for the developer application.
+
+    Oura defines an omitted scope as all available scopes. That matches this
+    private, single-user archive and automatically includes newly enabled Oura
+    data types without hard-coding a stale allowlist in the connector.
+    """
     params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": OURA_SCOPES,
         "state": state,
     }
     return f"{OURA_AUTH_URL}?{urlencode(params)}"
@@ -52,7 +54,7 @@ async def exchange_code(
 _refresh_lock = asyncio.Lock()
 
 
-async def refresh_access_token() -> str | None:
+async def refresh_access_token(rejected_access_token: str | None = None) -> str | None:
     """Serialized, and re-checked after acquiring the lock.
 
     Oura rotates refresh tokens on use: two concurrent refreshes (sync and
@@ -62,10 +64,14 @@ async def refresh_access_token() -> str | None:
     A waiter whose predecessor already refreshed reuses the fresh access token
     instead of spending the rotation again.
     """
-    before = await db.get_config("oura_access_token")
     async with _refresh_lock:
         current = await db.get_config("oura_access_token")
-        if current and current != before:
+        # A second request can receive a 401 from token A after another request
+        # has already exchanged the single-use refresh token for token B. In
+        # that case B is the answer; rotating again would invalidate B and make
+        # the first request fail on retry. Compare against the token that Oura
+        # actually rejected, not a DB snapshot taken while waiting for the lock.
+        if rejected_access_token and current and current != rejected_access_token:
             return current
         return await _do_refresh()
 
@@ -121,7 +127,8 @@ async def _get_with_retry(
         resp = await client.get(url, headers=headers, params=params)
         if resp.status_code == 401 and not refreshed:
             refreshed = True
-            new_token = await refresh_access_token()
+            rejected_token = headers.get("Authorization", "").removeprefix("Bearer ")
+            new_token = await refresh_access_token(rejected_token)
             if new_token:
                 headers["Authorization"] = f"Bearer {new_token}"
                 continue
@@ -657,5 +664,3 @@ async def _sync_daily_generic(client, headers, start_date, end_date):
                         metrics,
                     )
             await conn.commit()
-
-
